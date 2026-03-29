@@ -76,14 +76,14 @@ Do NOT modify these areas without explicit human approval:
 
 ## Current State
 **Last Updated:** 2026-03-29  
-**Current Phase:** Phase 1 — Foundation and Core Local Pipeline  
-**Working On:** Workspace setup and instruction scaffolding complete; implementation starts next.
+**Current Phase:** Phase 2 — Core Features  
+**Working On:** Four must-have MVP features (silence cutting, transcription, semantic matching, polish).
 
 ## Roadmap
-### Phase 1: Foundation
-- [ ] Initialize Electron + React + TypeScript + Tailwind scaffold
-- [ ] Wire Electron IPC to Python engine process
-- [ ] Validate local file ingest and processing handoff
+### Phase 1: Foundation (COMPLETE)
+- [x] Initialize Electron + React + TypeScript + Tailwind scaffold
+- [x] Wire Electron IPC to Python engine process
+- [x] Validate local file ingest and processing handoff
 
 ### Phase 2: Core Features
 - [ ] Smart Ingestion & Silence Cutting
