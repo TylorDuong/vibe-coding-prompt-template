@@ -36,7 +36,7 @@ def build_events(
     Event types:
       - caption: a transcript segment to display
       - graphic: a matched graphic to overlay
-      - sfx: a sound effect trigger
+      - sfx: sound effect cue (trigger: caption_entry, graphic_entry, silence_cut, attention_fill)
       - silence_cut: a removed silence interval
     """
     events: list[dict[str, Any]] = []
@@ -48,6 +48,14 @@ def build_events(
             "end": seg["end"],
             "text": seg.get("text", ""),
             "words": seg.get("words", []),
+        })
+        cap_sfx = "pop"
+        events.append({
+            "type": "sfx",
+            "start": seg["start"],
+            "sfx": cap_sfx,
+            "sfx_path": SFX_FILES.get(cap_sfx, ""),
+            "trigger": "caption_entry",
         })
 
     for m in matches:
@@ -72,11 +80,19 @@ def build_events(
             "trigger": "graphic_entry",
         })
 
+    cut_sfx = "whoosh"
     for s in silences:
         events.append({
             "type": "silence_cut",
             "start": s["start"],
             "end": s["end"],
+        })
+        events.append({
+            "type": "sfx",
+            "start": s["end"],
+            "sfx": cut_sfx,
+            "sfx_path": SFX_FILES.get(cut_sfx, ""),
+            "trigger": "silence_cut",
         })
 
     events.sort(key=lambda e: e["start"])

@@ -54,6 +54,15 @@ def test_build_events_counts() -> None:
     assert counts.get("sfx", 0) >= 1
 
 
+def test_sfx_triggers_include_caption_cut_and_graphic() -> None:
+    result = build_events(SEGMENTS, MATCHES, SILENCES, total_duration=10.0)
+    events = result.data["events"]
+    triggers = {e.get("trigger") for e in events if e["type"] == "sfx"}
+    assert "caption_entry" in triggers
+    assert "graphic_entry" in triggers
+    assert "silence_cut" in triggers
+
+
 def test_low_similarity_match_excluded() -> None:
     low_matches = [
         {

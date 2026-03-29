@@ -26,8 +26,15 @@ type StageResult = {
 }
 
 export type PipelineConfig = {
-  silenceThresholdMs: number
+  silenceThresholdDb: number
+  minSilenceDurationMs: number
+  paddingMs: number
+  mergeGapMs: number
+  minKeepMs: number
   attentionLengthMs: number
+  maxWords: number
+  /** Max seconds each graphic stays on screen during full export */
+  graphicDisplaySec: number
 }
 
 export type PipelineResult = {
@@ -102,7 +109,8 @@ export function useProcessPipeline() {
         updateStage('detecting_silence')
         const silenceResult = (await window.electron.invoke('engine:detectSilence', {
           videoPath,
-          minSilenceDurationMs: config.silenceThresholdMs,
+          silenceThresholdDb: config.silenceThresholdDb,
+          minSilenceDurationMs: config.minSilenceDurationMs,
         })) as StageResult
         const silences = silenceResult.ok && silenceResult.data
           ? (silenceResult.data.silences as Record<string, unknown>[]) ?? []
@@ -116,7 +124,11 @@ export function useProcessPipeline() {
           graphics: graphics
             .filter((g) => g.tag.trim())
             .map((g) => ({ filePath: g.filePath, tag: g.tag })),
-          silenceThresholdMs: config.silenceThresholdMs,
+          silenceThresholdDb: config.silenceThresholdDb,
+          minSilenceDurationMs: config.minSilenceDurationMs,
+          paddingMs: config.paddingMs,
+          mergeGapMs: config.mergeGapMs,
+          minKeepMs: config.minKeepMs,
         })) as StageResult
 
         if (!transcribeResult.ok) {

@@ -11,10 +11,14 @@ import sys
 
 from engine.result import EngineResult
 from engine.validation import validate_video_path, validate_output_path, sanitize_number
-from engine.video import validate_input, detect_silence, cut_silences, generate_thumbnail
+from engine.video import (
+    validate_input, detect_silence, cut_silences, generate_thumbnail,
+    _invert_silences, _pad_segments, _merge_close_segments, _drop_tiny_segments,
+)
 from engine.transcribe import transcribe
 from engine.match import semantic_match
 from engine.polish import build_events
+from engine.render import render_full
 
 
 def handle(message: dict) -> EngineResult:
@@ -75,7 +79,11 @@ def handle(message: dict) -> EngineResult:
         if not isinstance(graphics, list):
             graphics = []
 
-        silence_ms = int(sanitize_number(message.get("silenceThresholdMs"), 100, 5000, 500))
+        silence_db = int(sanitize_number(message.get("silenceThresholdDb"), -60, 0, -40))
+        silence_ms = int(sanitize_number(message.get("minSilenceDurationMs"), 100, 5000, 800))
+        padding_ms = int(sanitize_number(message.get("paddingMs"), 0, 1000, 200))
+        merge_gap_ms = int(sanitize_number(message.get("mergeGapMs"), 0, 2000, 300))
+        min_keep_ms = int(sanitize_number(message.get("minKeepMs"), 0, 1000, 150))
 
         ingest_result = validate_input(video_path)
         if not ingest_result.ok:
@@ -83,7 +91,7 @@ def handle(message: dict) -> EngineResult:
 
         total_duration = (ingest_result.data or {}).get("duration", 0) or 0
 
-        silence_result = detect_silence(video_path, min_silence_duration_ms=silence_ms)
+        silence_result = detect_silence(video_path, silence_threshold_db=silence_db, min_silence_duration_ms=silence_ms)
         silences = silence_result.data.get("silences", []) if silence_result.ok and silence_result.data else []
 
         transcript_result = transcribe(video_path)
@@ -122,7 +130,7 @@ def handle(message: dict) -> EngineResult:
             },
         )
 
-    if command == "export":
+    if command == "exportFull":
         video_path = message.get("videoPath", "")
         err = validate_video_path(video_path)
         if err:
@@ -131,13 +139,59 @@ def handle(message: dict) -> EngineResult:
         out_err = validate_output_path(output_path)
         if out_err:
             return out_err
-        silence_ms = int(sanitize_number(message.get("silenceThresholdMs"), 100, 5000, 500))
 
-        return cut_silences(
-            video_path,
-            output_path=output_path,
-            min_silence_duration_ms=silence_ms,
+        segments = message.get("segments", [])
+        matches = message.get("matches", [])
+        sfx_pool = message.get("sfxPool", {})
+        max_words = int(sanitize_number(message.get("maxWords"), 1, 20, 3))
+        silence_db = int(sanitize_number(message.get("silenceThresholdDb"), -60, 0, -40))
+        silence_ms = int(sanitize_number(message.get("minSilenceDurationMs"), 100, 5000, 800))
+        padding_ms = int(sanitize_number(message.get("paddingMs"), 0, 1000, 200))
+        merge_gap_ms = int(sanitize_number(message.get("mergeGapMs"), 0, 2000, 300))
+        min_keep_ms = int(sanitize_number(message.get("minKeepMs"), 0, 1000, 150))
+        attention_ms = int(sanitize_number(message.get("attentionLengthMs"), 500, 60000, 3000))
+        graphic_sec = float(sanitize_number(message.get("graphicDisplaySec"), 0.5, 30.0, 2.0))
+
+        silence_result = detect_silence(video_path, silence_threshold_db=silence_db, min_silence_duration_ms=silence_ms)
+        total_duration = silence_result.data.get("total_duration", 0) if silence_result.ok and silence_result.data else 0
+        silences = silence_result.data.get("silences", []) if silence_result.ok and silence_result.data else []
+
+        keep_segments = _invert_silences(silences, total_duration)
+        keep_segments = _pad_segments(keep_segments, padding_ms / 1000.0, total_duration)
+        keep_segments = _merge_close_segments(keep_segments, merge_gap_ms / 1000.0)
+        keep_segments = _drop_tiny_segments(keep_segments, min_keep_ms / 1000.0)
+
+        if not keep_segments:
+            keep_segments = [{"start": 0.0, "end": total_duration}]
+
+        segs = segments if isinstance(segments, list) else []
+        mats = matches if isinstance(matches, list) else []
+        ev_result = build_events(
+            segs,
+            mats,
+            silences,
+            float(total_duration),
+            attention_length_ms=attention_ms,
         )
+        events = ev_result.data.get("events", []) if ev_result.ok and ev_result.data else []
+
+        result = render_full(
+            video_path=video_path,
+            output_path=output_path,
+            segments=segs,
+            matches=mats,
+            sfx_pool=sfx_pool if isinstance(sfx_pool, dict) else {},
+            keep_segments=keep_segments,
+            events=events,
+            max_words=max_words,
+            graphic_display_sec=graphic_sec,
+        )
+        if result.ok and result.data is not None:
+            new_dur = sum(float(s["end"]) - float(s["start"]) for s in keep_segments)
+            result.data["original_duration"] = float(total_duration)
+            result.data["new_duration"] = round(new_dur, 3)
+            result.data["silences_removed"] = len(silences)
+        return result
 
     return EngineResult(ok=False, error=f"Unknown command: {command}")
 

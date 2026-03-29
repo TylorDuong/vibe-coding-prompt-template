@@ -42,6 +42,21 @@ export function registerIpcHandlers(): void {
     return { canceled: false, filePath: result.filePaths[0] }
   })
 
+  ipcMain.handle('dialog:openSfx', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Select a sound effect file',
+      filters: [
+        { name: 'Audio', extensions: ['wav', 'mp3', 'ogg', 'aac', 'm4a'] },
+      ],
+      properties: ['openFile'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true }
+    }
+    return { canceled: false, filePath: result.filePaths[0] }
+  })
+
   ipcMain.handle('dialog:openImages', async () => {
     const win = BrowserWindow.getFocusedWindow()
     const result = await dialog.showOpenDialog(win!, {
@@ -103,14 +118,15 @@ export function registerIpcHandlers(): void {
     const videoPath = validateFilePath(p.videoPath)
     if (!videoPath) return ipcError('Invalid or missing video file path.')
 
-    const graphics = Array.isArray(p.graphics) ? p.graphics : []
-    const silenceThresholdMs = clampNumber(p.silenceThresholdMs, 100, 5000, 500)
-
     return sendToEngine({
       command: 'process',
       videoPath,
-      graphics,
-      silenceThresholdMs,
+      graphics: Array.isArray(p.graphics) ? p.graphics : [],
+      silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -40),
+      minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 800),
+      paddingMs: clampNumber(p.paddingMs, 0, 1000, 200),
+      mergeGapMs: clampNumber(p.mergeGapMs, 0, 2000, 300),
+      minKeepMs: clampNumber(p.minKeepMs, 0, 1000, 150),
     })
   })
 
@@ -122,8 +138,8 @@ export function registerIpcHandlers(): void {
     return sendToEngine({
       command: 'detectSilence',
       videoPath,
-      silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -30),
-      minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 500),
+      silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -40),
+      minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 800),
     })
   })
 
@@ -131,18 +147,18 @@ export function registerIpcHandlers(): void {
     const p = payload as Record<string, unknown>
     const videoPath = validateFilePath(p.videoPath)
     if (!videoPath) return ipcError('Invalid or missing video file path.')
-    const outputPath = validateOutputPath(p.outputPath)
 
     return sendToEngine({
       command: 'cutSilences',
       videoPath,
-      outputPath,
-      silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -30),
-      minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 500),
+      outputPath: validateOutputPath(p.outputPath),
+      silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -40),
+      minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 800),
+      paddingMs: clampNumber(p.paddingMs, 0, 1000, 200),
     })
   })
 
-  ipcMain.handle('engine:export', async (_event, payload: unknown) => {
+  ipcMain.handle('engine:exportFull', async (_event, payload: unknown) => {
     const p = payload as Record<string, unknown>
     const videoPath = validateFilePath(p.videoPath)
     if (!videoPath) return ipcError('Invalid or missing video file path.')
@@ -150,10 +166,20 @@ export function registerIpcHandlers(): void {
     if (!outputPath) return ipcError('Invalid or missing output file path.')
 
     return sendToEngine({
-      command: 'export',
+      command: 'exportFull',
       videoPath,
       outputPath,
-      silenceThresholdMs: clampNumber(p.silenceThresholdMs, 100, 5000, 500),
+      segments: p.segments ?? [],
+      matches: p.matches ?? [],
+      sfxPool: p.sfxPool ?? {},
+      maxWords: clampNumber(p.maxWords, 1, 20, 3),
+      silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -40),
+      minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 800),
+      paddingMs: clampNumber(p.paddingMs, 0, 1000, 200),
+      mergeGapMs: clampNumber(p.mergeGapMs, 0, 2000, 300),
+      minKeepMs: clampNumber(p.minKeepMs, 0, 1000, 150),
+      attentionLengthMs: clampNumber(p.attentionLengthMs, 500, 60000, 3000),
+      graphicDisplaySec: clampNumber(p.graphicDisplaySec, 0.5, 30, 2),
     })
   })
 }

@@ -3,9 +3,11 @@ import UploadZone, { type FileMetadata } from './components/UploadZone'
 import FileCard from './components/FileCard'
 import ProcessButton from './components/ProcessButton'
 import ProgressBar from './components/ProgressBar'
+import ConfigPanel from './components/ConfigPanel'
+import SfxPoolPanel, { buildSfxPool, DEFAULT_SFX_SLOTS, type SfxSlot } from './components/SfxPoolPanel'
 import TimelinePreview, { type TimelineData } from './components/TimelinePreview'
 import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
-import ExportButton from './components/ExportButton'
+import ExportVideoButton from './components/ExportVideoButton'
 import { useProcessPipeline, type PipelineConfig } from './hooks/useProcessPipeline'
 
 type EngineStatus = 'checking' | 'connected' | 'error'
@@ -16,8 +18,14 @@ type LoadedFile = {
 }
 
 const DEFAULT_CONFIG: PipelineConfig = {
-  silenceThresholdMs: 800,
+  silenceThresholdDb: -40,
+  minSilenceDurationMs: 800,
+  paddingMs: 200,
+  mergeGapMs: 300,
+  minKeepMs: 150,
   attentionLengthMs: 3000,
+  maxWords: 3,
+  graphicDisplaySec: 2,
 }
 
 function App(): React.JSX.Element {
@@ -25,6 +33,7 @@ function App(): React.JSX.Element {
   const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null)
   const [graphics, setGraphics] = useState<GraphicItem[]>([])
   const [config, setConfig] = useState<PipelineConfig>(DEFAULT_CONFIG)
+  const [sfxSlots, setSfxSlots] = useState<SfxSlot[]>(DEFAULT_SFX_SLOTS)
   const pipeline = useProcessPipeline()
 
   const checkEngine = useCallback(() => {
@@ -77,6 +86,12 @@ function App(): React.JSX.Element {
     )
   }, [])
 
+  const handleSfxSlotUpdate = useCallback((id: string, updates: Partial<SfxSlot>) => {
+    setSfxSlots((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
+    )
+  }, [])
+
   const handleProcess = useCallback(async () => {
     if (!loadedFile) return
     pipeline.run(loadedFile.filePath, graphics, config)
@@ -105,12 +120,12 @@ function App(): React.JSX.Element {
         <h1 className="text-base font-semibold tracking-tight text-zinc-50">
           Splitty AI
         </h1>
-        <span className="text-xs text-zinc-600">v0.1.0</span>
+        <span className="text-xs text-zinc-600">v0.2.0</span>
       </header>
 
       <main className="flex flex-1 overflow-hidden">
         {/* Workspace area */}
-        <section className="flex flex-1 flex-col overflow-auto">
+        <section className="flex flex-1 flex-col overflow-auto pb-4">
           {loadedFile ? (
             <>
               <FileCard
@@ -119,50 +134,16 @@ function App(): React.JSX.Element {
                 onClear={handleClear}
               />
 
-              {/* Config controls */}
-              <div className="mx-4 mt-3 flex items-center gap-4">
-                <label className="flex items-center gap-2 text-xs text-zinc-400">
-                  Silence threshold
-                  <input
-                    type="number"
-                    min={100}
-                    max={2000}
-                    step={100}
-                    value={config.silenceThresholdMs}
-                    onChange={(e) =>
-                      setConfig((c) => ({
-                        ...c,
-                        silenceThresholdMs: Number(e.target.value),
-                      }))
-                    }
-                    disabled={isProcessing}
-                    className="w-20 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                               focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
-                  />
-                  <span className="text-zinc-600">ms</span>
-                </label>
+              <ConfigPanel
+                config={config}
+                onChange={setConfig}
+                disabled={isProcessing}
+              />
 
-                <label className="flex items-center gap-2 text-xs text-zinc-400">
-                  Attention length
-                  <input
-                    type="number"
-                    min={1000}
-                    max={10000}
-                    step={500}
-                    value={config.attentionLengthMs}
-                    onChange={(e) =>
-                      setConfig((c) => ({
-                        ...c,
-                        attentionLengthMs: Number(e.target.value),
-                      }))
-                    }
-                    disabled={isProcessing}
-                    className="w-20 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                               focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
-                  />
-                  <span className="text-zinc-600">ms</span>
-                </label>
-              </div>
+              <SfxPoolPanel
+                slots={sfxSlots}
+                onUpdate={handleSfxSlotUpdate}
+              />
 
               <div className="mx-4 mt-3">
                 <ProcessButton
@@ -190,9 +171,11 @@ function App(): React.JSX.Element {
 
               {pipeline.result && (
                 <>
-                  <ExportButton
+                  <ExportVideoButton
                     videoPath={loadedFile.filePath}
-                    silenceThresholdMs={config.silenceThresholdMs}
+                    config={config}
+                    pipelineResult={pipeline.result}
+                    sfxPool={buildSfxPool(sfxSlots)}
                     disabled={isProcessing}
                   />
                   <TimelinePreview timeline={pipeline.result as unknown as TimelineData} />

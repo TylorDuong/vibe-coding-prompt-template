@@ -15,7 +15,8 @@ const ALLOWED_CHANNELS = [
   'dialog:openVideo',
   'dialog:openImages',
   'dialog:saveVideo',
-  'engine:export',
+  'engine:exportFull',
+  'dialog:openSfx',
 ]
 
 const electronAPI: ElectronAPI = {

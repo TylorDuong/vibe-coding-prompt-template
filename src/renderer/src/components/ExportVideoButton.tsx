@@ -1,8 +1,12 @@
 import { useState, useCallback } from 'react'
+import type { PipelineConfig, PipelineResult } from '../hooks/useProcessPipeline'
+import type { SfxPool } from './SfxPoolPanel'
 
-type ExportButtonProps = {
+type ExportVideoButtonProps = {
   videoPath: string
-  silenceThresholdMs: number
+  config: PipelineConfig
+  pipelineResult: PipelineResult
+  sfxPool: SfxPool
   disabled: boolean
 }
 
@@ -15,18 +19,23 @@ type ExportResult = {
   ok: boolean
   data?: {
     output_path: string
-    original_duration: number
-    new_duration: number
-    silences_removed: number
+    captions_rendered: number
+    graphics_rendered: number
+    sfx_rendered: number
+    original_duration?: number
+    new_duration?: number
+    silences_removed?: number
   }
   error?: string
 }
 
-export default function ExportButton({
+export default function ExportVideoButton({
   videoPath,
-  silenceThresholdMs,
+  config,
+  pipelineResult,
+  sfxPool,
   disabled,
-}: ExportButtonProps): React.JSX.Element {
+}: ExportVideoButtonProps): React.JSX.Element {
   const [isExporting, setIsExporting] = useState(false)
   const [result, setResult] = useState<ExportResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -44,10 +53,20 @@ export default function ExportButton({
 
       setIsExporting(true)
 
-      const exportResult = (await window.electron.invoke('engine:export', {
+      const exportResult = (await window.electron.invoke('engine:exportFull', {
         videoPath,
         outputPath: dialogResult.filePath,
-        silenceThresholdMs,
+        segments: pipelineResult.segments,
+        matches: pipelineResult.matches,
+        sfxPool,
+        maxWords: config.maxWords,
+        silenceThresholdDb: config.silenceThresholdDb,
+        minSilenceDurationMs: config.minSilenceDurationMs,
+        paddingMs: config.paddingMs,
+        mergeGapMs: config.mergeGapMs,
+        minKeepMs: config.minKeepMs,
+        attentionLengthMs: config.attentionLengthMs,
+        graphicDisplaySec: config.graphicDisplaySec,
       })) as ExportResult
 
       if (exportResult.ok && exportResult.data) {
@@ -60,7 +79,7 @@ export default function ExportButton({
     } finally {
       setIsExporting(false)
     }
-  }, [videoPath, silenceThresholdMs])
+  }, [videoPath, config, pipelineResult, sfxPool])
 
   return (
     <div className="mx-4 mt-3 space-y-2">
@@ -79,29 +98,35 @@ export default function ExportButton({
         {isExporting ? (
           <span className="flex items-center justify-center gap-2">
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-zinc-600 border-t-white" />
-            Exporting...
+            Exporting video…
           </span>
         ) : (
-          'Export Video (Silence Cut)'
+          'Export Video'
         )}
       </button>
 
       {result?.data && (
         <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3 space-y-1">
-          <p className="text-xs text-emerald-400 font-medium">Export complete!</p>
+          <p className="text-xs text-emerald-400 font-medium">Export complete</p>
           <p className="text-xs text-zinc-400">
             Saved to: <span className="text-zinc-300">{result.data.output_path}</span>
           </p>
+          {typeof result.data.original_duration === 'number' &&
+            typeof result.data.new_duration === 'number' && (
+              <p className="text-xs text-zinc-500">
+                {result.data.original_duration.toFixed(1)}s → {result.data.new_duration.toFixed(1)}s
+                {typeof result.data.silences_removed === 'number' &&
+                  ` (${result.data.silences_removed} silences removed)`}
+              </p>
+            )}
           <p className="text-xs text-zinc-500">
-            {result.data.original_duration.toFixed(1)}s → {result.data.new_duration.toFixed(1)}s
-            ({result.data.silences_removed} silences removed)
+            {result.data.captions_rendered} caption beats, {result.data.graphics_rendered} graphics,{' '}
+            {result.data.sfx_rendered} SFX mixed
           </p>
         </div>
       )}
 
-      {error && (
-        <p className="text-xs text-red-400">{error}</p>
-      )}
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   )
 }
