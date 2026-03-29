@@ -20,9 +20,10 @@ import json
 import sys
 
 from engine.result import EngineResult
-from engine.video import validate_input
+from engine.video import validate_input, detect_silence, cut_silences
 from engine.transcribe import transcribe
 from engine.match import semantic_match
+from engine.polish import build_events
 
 
 def handle(message: dict) -> EngineResult:
@@ -34,6 +35,21 @@ def handle(message: dict) -> EngineResult:
     if command == "ingest":
         return validate_input(message.get("videoPath", ""))
 
+    if command == "detectSilence":
+        return detect_silence(
+            message.get("videoPath", ""),
+            silence_threshold_db=message.get("silenceThresholdDb", -30),
+            min_silence_duration_ms=message.get("minSilenceDurationMs", 500),
+        )
+
+    if command == "cutSilences":
+        return cut_silences(
+            message.get("videoPath", ""),
+            output_path=message.get("outputPath"),
+            silence_threshold_db=message.get("silenceThresholdDb", -30),
+            min_silence_duration_ms=message.get("minSilenceDurationMs", 500),
+        )
+
     if command == "process":
         video_path = message.get("videoPath", "")
         graphics = message.get("graphics", [])
@@ -43,12 +59,31 @@ def handle(message: dict) -> EngineResult:
         if not ingest_result.ok:
             return ingest_result
 
+        total_duration = (ingest_result.data or {}).get("duration", 0) or 0
+
+        silence_result = detect_silence(video_path, min_silence_duration_ms=silence_ms)
+        silences = silence_result.data.get("silences", []) if silence_result.ok and silence_result.data else []
+
         transcript_result = transcribe(video_path)
         if not transcript_result.ok:
             return transcript_result
 
         segments = transcript_result.data["segments"] if transcript_result.data else []
-        match_result = semantic_match(segments, graphics)
+        matches_list: list = []
+        if graphics:
+            match_result = semantic_match(segments, graphics)
+            if match_result.ok and match_result.data:
+                matches_list = match_result.data["matches"]
+
+        polish_result = build_events(
+            segments=segments,
+            matches=matches_list,
+            silences=silences,
+            total_duration=total_duration,
+            attention_length_ms=3000,
+        )
+        events = polish_result.data["events"] if polish_result.ok and polish_result.data else []
+        event_counts = polish_result.data.get("event_counts", {}) if polish_result.ok and polish_result.data else {}
 
         return EngineResult(
             ok=True,
@@ -56,9 +91,11 @@ def handle(message: dict) -> EngineResult:
                 "timeline": {
                     "video": ingest_result.data,
                     "segments": segments,
-                    "matches": match_result.data["matches"] if match_result.data else [],
+                    "matches": matches_list,
+                    "silences": silences,
                     "silenceThresholdMs": silence_ms,
-                    "events": [],
+                    "events": events,
+                    "eventCounts": event_counts,
                 }
             },
         )

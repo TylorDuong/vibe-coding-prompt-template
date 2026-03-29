@@ -4,7 +4,13 @@ export type ElectronAPI = {
   invoke: (channel: string, data?: unknown) => Promise<unknown>
 }
 
-const ALLOWED_CHANNELS = ['engine:health', 'engine:ingest', 'engine:processVideo']
+const ALLOWED_CHANNELS = [
+  'engine:health',
+  'engine:ingest',
+  'engine:processVideo',
+  'engine:detectSilence',
+  'engine:cutSilences',
+]
 
 const electronAPI: ElectronAPI = {
   invoke: (channel: string, data?: unknown): Promise<unknown> => {

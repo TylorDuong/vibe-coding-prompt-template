@@ -20,4 +20,25 @@ export function registerIpcHandlers(): void {
       silenceThresholdMs: p.silenceThresholdMs ?? 500,
     })
   })
+
+  ipcMain.handle('engine:detectSilence', async (_event, payload: unknown) => {
+    const p = payload as Record<string, unknown>
+    return sendToEngine({
+      command: 'detectSilence',
+      videoPath: p.videoPath,
+      silenceThresholdDb: p.silenceThresholdDb ?? -30,
+      minSilenceDurationMs: p.minSilenceDurationMs ?? 500,
+    })
+  })
+
+  ipcMain.handle('engine:cutSilences', async (_event, payload: unknown) => {
+    const p = payload as Record<string, unknown>
+    return sendToEngine({
+      command: 'cutSilences',
+      videoPath: p.videoPath,
+      outputPath: p.outputPath,
+      silenceThresholdDb: p.silenceThresholdDb ?? -30,
+      minSilenceDurationMs: p.minSilenceDurationMs ?? 500,
+    })
+  })
 }

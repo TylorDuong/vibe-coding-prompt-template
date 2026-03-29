@@ -3,6 +3,7 @@ import UploadZone, { type FileMetadata } from './components/UploadZone'
 import FileCard from './components/FileCard'
 import ProcessButton from './components/ProcessButton'
 import TimelinePreview, { type TimelineData } from './components/TimelinePreview'
+import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
 
 type EngineStatus = 'checking' | 'connected' | 'error'
 
@@ -20,6 +21,7 @@ type ProcessResult = {
 function App(): React.JSX.Element {
   const [engineStatus, setEngineStatus] = useState<EngineStatus>('checking')
   const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null)
+  const [graphics, setGraphics] = useState<GraphicItem[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [timeline, setTimeline] = useState<TimelineData | null>(null)
   const [processError, setProcessError] = useState<string | null>(null)
@@ -46,6 +48,20 @@ function App(): React.JSX.Element {
     setProcessError(null)
   }, [])
 
+  const handleAddGraphic = useCallback((graphic: GraphicItem) => {
+    setGraphics((prev) => [...prev, graphic])
+  }, [])
+
+  const handleRemoveGraphic = useCallback((id: string) => {
+    setGraphics((prev) => prev.filter((g) => g.id !== id))
+  }, [])
+
+  const handleTagChange = useCallback((id: string, tag: string) => {
+    setGraphics((prev) =>
+      prev.map((g) => (g.id === id ? { ...g, tag } : g))
+    )
+  }, [])
+
   const handleProcess = useCallback(async () => {
     if (!loadedFile) return
     setIsProcessing(true)
@@ -55,7 +71,7 @@ function App(): React.JSX.Element {
     try {
       const result = (await window.electron.invoke('engine:processVideo', {
         videoPath: loadedFile.filePath,
-        graphics: [],
+        graphics: graphics.map((g) => ({ filePath: g.filePath, tag: g.tag })),
         silenceThresholdMs: 500,
       })) as ProcessResult
 
@@ -69,7 +85,7 @@ function App(): React.JSX.Element {
     } finally {
       setIsProcessing(false)
     }
-  }, [loadedFile])
+  }, [loadedFile, graphics])
 
   const statusColor: Record<EngineStatus, string> = {
     checking: 'text-yellow-500',
@@ -120,19 +136,13 @@ function App(): React.JSX.Element {
           )}
         </section>
 
-        {/* Sidebar */}
-        <aside className="flex w-72 flex-col border-l border-zinc-800 bg-zinc-950">
-          <div className="border-b border-zinc-800 px-4 py-3">
-            <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-              Graphics
-            </h2>
-          </div>
-          <div className="flex flex-1 items-center justify-center p-4">
-            <p className="text-center text-xs text-zinc-600">
-              Drag images here and tag them with keywords
-            </p>
-          </div>
-        </aside>
+        {/* Graphics sidebar */}
+        <GraphicsSidebar
+          graphics={graphics}
+          onAdd={handleAddGraphic}
+          onRemove={handleRemoveGraphic}
+          onTagChange={handleTagChange}
+        />
       </main>
 
       {/* Status bar */}

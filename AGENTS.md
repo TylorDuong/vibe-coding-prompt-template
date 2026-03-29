@@ -76,8 +76,8 @@ Do NOT modify these areas without explicit human approval:
 
 ## Current State
 **Last Updated:** 2026-03-29  
-**Current Phase:** Phase 2 — Core Features  
-**Working On:** Four must-have MVP features (silence cutting, transcription, semantic matching, polish).
+**Current Phase:** Phase 3 — Quality & UX  
+**Working On:** Progress indicators, timeline UX, error handling hardening.
 
 ## Roadmap
 ### Phase 1: Foundation (COMPLETE)
@@ -85,11 +85,11 @@ Do NOT modify these areas without explicit human approval:
 - [x] Wire Electron IPC to Python engine process
 - [x] Validate local file ingest and processing handoff
 
-### Phase 2: Core Features
-- [ ] Smart Ingestion & Silence Cutting
-- [ ] Local Transcription & Auto-Captioning
-- [ ] Semantic Graphic Matching
-- [ ] Automated Polish (Animations & SFX)
+### Phase 2: Core Features (COMPLETE)
+- [x] Smart Ingestion & Silence Cutting
+- [x] Local Transcription & Auto-Captioning
+- [x] Semantic Graphic Matching
+- [x] Automated Polish (Animations & SFX)
 
 ### Phase 3: Quality & UX
 - [ ] Progress indicators for transcription/matching/rendering

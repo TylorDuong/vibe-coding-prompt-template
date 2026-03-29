@@ -2,73 +2,121 @@ type TimelineSegment = {
   start: number
   end: number
   text: string
+  words?: Array<{ word: string; start: number; end: number; probability: number }>
 }
 
 type TimelineMatch = {
   graphic: string
   tag: string
   matched_segment_start: number
+  matched_segment_end: number
+  matched_text: string
   similarity: number
 }
 
+type SilenceInterval = {
+  start: number
+  end: number
+}
+
+type TimelineEvent = {
+  type: string
+  start: number
+  end?: number
+  text?: string
+  sfx?: string
+  trigger?: string
+  tag?: string
+  filePath?: string
+  similarity?: number
+  animation?: string
+}
+
 type TimelineData = {
-  video: { filename: string; size_bytes: number; extension: string } | null
+  video: { filename: string; size_bytes: number; extension: string; duration?: number } | null
   segments: TimelineSegment[]
   matches: TimelineMatch[]
+  silences: SilenceInterval[]
   silenceThresholdMs: number
-  events: unknown[]
+  events: TimelineEvent[]
+  eventCounts?: Record<string, number>
 }
 
 type TimelinePreviewProps = {
   timeline: TimelineData
 }
 
+const EVENT_STYLES: Record<string, { bg: string; label: string; color: string }> = {
+  caption: { bg: 'bg-blue-950/30', label: 'CAPTION', color: 'text-blue-400/70' },
+  graphic: { bg: 'bg-emerald-950/30', label: 'GRAPHIC', color: 'text-emerald-400/70' },
+  sfx: { bg: 'bg-amber-950/30', label: 'SFX', color: 'text-amber-400/70' },
+  silence_cut: { bg: 'bg-red-950/30', label: 'CUT', color: 'text-red-400/70' },
+}
+
 export default function TimelinePreview({ timeline }: TimelinePreviewProps): React.JSX.Element {
+  const silences = timeline.silences ?? []
+  const events = timeline.events ?? []
+  const counts = timeline.eventCounts ?? {}
+  const totalSilence = silences.reduce((sum, s) => sum + (s.end - s.start), 0)
+
   return (
     <div className="m-4 space-y-4 overflow-auto rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-      <h3 className="text-sm font-medium text-zinc-300">Pipeline Result (Stub)</h3>
+      <h3 className="text-sm font-medium text-zinc-300">Pipeline Result</h3>
 
-      {/* Segments */}
-      <div>
-        <h4 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
-          Transcript Segments
-        </h4>
-        {timeline.segments.length === 0 ? (
-          <p className="text-xs text-zinc-600">No segments</p>
-        ) : (
-          <ul className="space-y-1">
-            {timeline.segments.map((seg, i) => (
-              <li
-                key={i}
-                className="flex items-baseline gap-2 rounded bg-zinc-800/50 px-3 py-1.5 text-xs"
-              >
-                <span className="font-mono text-zinc-500">
-                  {seg.start.toFixed(1)}s–{seg.end.toFixed(1)}s
-                </span>
-                <span className="text-zinc-300">{seg.text}</span>
-              </li>
-            ))}
-          </ul>
+      {/* Summary bar */}
+      <div className="flex flex-wrap gap-2 text-xs">
+        {timeline.video?.duration != null && (
+          <span className="rounded bg-zinc-800 px-2 py-1 text-zinc-400">
+            {timeline.video.duration.toFixed(1)}s
+          </span>
         )}
+        <span className="rounded bg-blue-900/40 px-2 py-1 text-blue-300">
+          {counts.caption ?? timeline.segments.length} captions
+        </span>
+        <span className="rounded bg-red-900/40 px-2 py-1 text-red-300">
+          {silences.length} silences ({totalSilence.toFixed(1)}s)
+        </span>
+        <span className="rounded bg-emerald-900/40 px-2 py-1 text-emerald-300">
+          {counts.graphic ?? timeline.matches.length} graphics
+        </span>
+        <span className="rounded bg-amber-900/40 px-2 py-1 text-amber-300">
+          {counts.sfx ?? 0} sfx
+        </span>
       </div>
 
-      {/* Matches */}
-      {timeline.matches.length > 0 && (
+      {/* Event timeline */}
+      {events.length > 0 && (
         <div>
           <h4 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
-            Graphic Matches
+            Timeline Events ({events.length})
           </h4>
-          <ul className="space-y-1">
-            {timeline.matches.map((m, i) => (
-              <li
-                key={i}
-                className="flex items-baseline gap-2 rounded bg-zinc-800/50 px-3 py-1.5 text-xs"
-              >
-                <span className="font-mono text-zinc-500">@{m.matched_segment_start.toFixed(1)}s</span>
-                <span className="text-zinc-300">{m.tag || m.graphic}</span>
-                <span className="text-zinc-600">sim={m.similarity.toFixed(2)}</span>
-              </li>
-            ))}
+          <ul className="space-y-1 max-h-80 overflow-auto">
+            {events.map((evt, i) => {
+              const style = EVENT_STYLES[evt.type] ?? {
+                bg: 'bg-zinc-800/50',
+                label: evt.type.toUpperCase(),
+                color: 'text-zinc-400',
+              }
+              return (
+                <li
+                  key={i}
+                  className={`flex items-baseline gap-2 rounded px-3 py-1.5 text-xs ${style.bg}`}
+                >
+                  <span className={`font-mono shrink-0 w-14 text-right ${style.color}`}>
+                    {evt.start.toFixed(1)}s
+                  </span>
+                  <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-bold ${style.color} bg-black/20`}>
+                    {style.label}
+                  </span>
+                  <span className="text-zinc-300 truncate">
+                    {evt.type === 'caption' && evt.text}
+                    {evt.type === 'graphic' && `${evt.tag || evt.filePath} (sim=${evt.similarity?.toFixed(2)})`}
+                    {evt.type === 'sfx' && `${evt.sfx} [${evt.trigger}]`}
+                    {evt.type === 'silence_cut' && evt.end != null && `${evt.start.toFixed(1)}s–${evt.end.toFixed(1)}s removed`}
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}
@@ -76,7 +124,7 @@ export default function TimelinePreview({ timeline }: TimelinePreviewProps): Rea
       {/* Config */}
       <div className="flex gap-4 text-xs text-zinc-600">
         <span>Silence threshold: {timeline.silenceThresholdMs}ms</span>
-        <span>Events: {timeline.events.length}</span>
+        <span>Attention length: 3000ms</span>
       </div>
     </div>
   )
