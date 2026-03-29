@@ -12,14 +12,13 @@ type IngestResult = {
   error?: string
 }
 
-type UploadZoneProps = {
-  onFileAccepted: (filePath: string, meta: FileMetadata) => void
+type DialogResult = {
+  canceled: boolean
+  filePath?: string
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+type UploadZoneProps = {
+  onFileAccepted: (filePath: string, meta: FileMetadata) => void
 }
 
 const ACCEPTED_EXTENSIONS = new Set(['.mp4', '.mov', '.webm', '.mkv', '.avi'])
@@ -29,22 +28,8 @@ export default function UploadZone({ onFileAccepted }: UploadZoneProps): React.J
   const [error, setError] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
 
-  const handleDrop = useCallback(
-    async (e: DragEvent<HTMLDivElement>) => {
-      e.preventDefault()
-      e.stopPropagation()
-      setIsDragging(false)
-      setError(null)
-
-      const file = e.dataTransfer.files[0]
-      if (!file) return
-
-      const filePath = (file as File & { path?: string }).path
-      if (!filePath) {
-        setError('Could not read file path. Please try again.')
-        return
-      }
-
+  const ingestFile = useCallback(
+    async (filePath: string) => {
       const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
       if (!ACCEPTED_EXTENSIONS.has(ext)) {
         setError(`Unsupported format "${ext}". Use MP4, MOV, WebM, MKV, or AVI.`)
@@ -52,6 +37,7 @@ export default function UploadZone({ onFileAccepted }: UploadZoneProps): React.J
       }
 
       setIsProcessing(true)
+      setError(null)
       try {
         const result = (await window.electron.invoke('engine:ingest', {
           videoPath: filePath,
@@ -69,6 +55,41 @@ export default function UploadZone({ onFileAccepted }: UploadZoneProps): React.J
       }
     },
     [onFileAccepted]
+  )
+
+  const handleChooseFile = useCallback(async () => {
+    setError(null)
+    try {
+      const result = (await window.electron.invoke('dialog:openVideo')) as DialogResult
+      if (result.canceled || !result.filePath) return
+      await ingestFile(result.filePath)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open file dialog')
+    }
+  }, [ingestFile])
+
+  const handleDrop = useCallback(
+    async (e: DragEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setIsDragging(false)
+      setError(null)
+
+      const file = e.dataTransfer.files[0]
+      if (!file) return
+
+      const filePath = (file as File & { path?: string }).path
+      if (filePath) {
+        await ingestFile(filePath)
+        return
+      }
+
+      setError(
+        'Could not read the file path from drag-and-drop. ' +
+        'Please use the "Choose File" button instead.'
+      )
+    },
+    [ingestFile]
   )
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -120,8 +141,16 @@ export default function UploadZone({ onFileAccepted }: UploadZoneProps): React.J
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
             <p className="text-sm">
-              {isDragging ? 'Release to upload' : 'Drop a video file here to get started'}
+              {isDragging ? 'Release to upload' : 'Drop a video file here'}
             </p>
+            <p className="text-xs text-zinc-600">or</p>
+            <button
+              onClick={handleChooseFile}
+              className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white
+                         transition-colors hover:bg-blue-500 active:bg-blue-700"
+            >
+              Choose File
+            </button>
             <p className="text-xs text-zinc-700">MP4, MOV, WebM, MKV, AVI</p>
           </>
         )}
