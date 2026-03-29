@@ -1,0 +1,15 @@
+# Cursor Rules (Legacy Fallback) for Splitty AI
+
+## Directives
+1. Always read `AGENTS.md` first.
+2. Use `agent_docs/` as detailed source of truth.
+3. Plan first, then execute in small increments.
+4. Verify each feature with tests/lint/type checks.
+5. Respect local-first MVP and strict typing constraints.
+
+## Commands
+- `npm run dev`
+- `npm test`
+- `npm run lint`
+- `npx tsc --noEmit`
+- `pytest`

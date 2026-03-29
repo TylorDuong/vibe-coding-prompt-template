@@ -1,0 +1,154 @@
+# Product Requirements Document: Splitty AI MVP
+
+## Overview
+
+**Product Name:** Splitty AI
+**Problem Statement:** Creating high-retention short-form video requires hours of tedious timeline editing, and existing automated solutions are either too rigid or rely on expensive cloud-based subscriptions.
+**MVP Goal:** Deliver a $0-cost, fully local, open-source desktop application that automates video pacing, captioning, and graphic matching without throttling standard consumer hardware.
+**Target Launch:** 8-12 weeks
+
+## Target Users
+
+### Primary User Profile
+**Who:** Startup founders and tech creators (starting with the developer).
+**Problem:** Need to produce engaging "edutainment" content to build brand equity but lack the time for manual editing and the budget for expensive AI tools.
+**Current Solution:** Manual NLE editing (Premiere/CapCut) or paying for rigid, black-box cloud services (OpusClip, Submagic).
+**Why They'll Switch:** Splitty AI is completely free, runs locally, keeps data private, and offers unique semantic matching for custom graphics.
+
+### User Persona: The Bootstrapped Founder
+- **Demographics:** Tech-savvy entrepreneurs and developers building in public.
+- **Tech Level:** Advanced.
+- **Goals:** Gain market traction and audience engagement through consistent video output.
+- **Frustrations:** Tedious editing workflows; finding the exact timestamp to insert a graphic to match their speech.
+
+## User Journey
+
+### The Story
+Tylor just finished recording a 60-second raw video talking about a new software architecture. Instead of spending two hours editing, he opens Splitty AI. He drags and drops his raw video file and a few diagrams he wants to show. He types a quick descriptive keyword for each diagram. Splitty AI processes the video locally, cuts the dead air, transcribes the audio, and perfectly times the diagrams to pop up exactly when he mentions them, complete with a quick animation and a "whoosh" sound effect. Five minutes later, the video is exported and ready for TikTok.
+
+### Key Touchpoints
+1. **Discovery:** Built for personal use initially.
+2. **First Contact:** Opening the lightweight desktop application.
+3. **Core Loop:** Uploading video + graphics -> App processes locally -> Preview -> Export.
+4. **Retention:** Time saved per video makes it an indispensable daily tool.
+
+## MVP Features
+
+### Core Features (Must Have)
+
+#### 1. Smart Ingestion & Silence Cutting
+- **Description:** Imports raw video and automatically detects/removes audio dead space.
+- **User Value:** Instantly creates the fast-paced "jump cut" style required for short-form content.
+- **Success Criteria:**
+  - Users can upload standard MP4/MOV files.
+  - System successfully identifies and removes pauses over a set millisecond threshold.
+- **Priority:** Critical
+
+#### 2. Local Transcription & Auto-Captioning
+- **Description:** Uses an optimized local open-source model (e.g., Whisper.cpp) to transcribe audio and generate timestamped captions.
+- **User Value:** Provides high-accuracy text overlays for silent scrolling without API costs.
+- **Success Criteria:**
+  - Transcribes audio accurately on local hardware.
+  - Renders text dynamically on screen.
+- **Priority:** Critical
+
+#### 3. Semantic Graphic Matching
+- **Description:** Uses a lightweight local vector model (e.g., SBERT MiniLM) to calculate cosine similarity between the transcript chunks and the user's graphic descriptions, placing the image at the optimal timestamp.
+- **User Value:** Eliminates the need to manually scrub timelines to match visual aids to speech.
+- **Success Criteria:**
+  - User can attach a text description to an uploaded graphic.
+  - System places graphic within a 2-second window of the relevant spoken concept.
+- **Priority:** Critical
+
+#### 4. Automated Polish (Animations & SFX)
+- **Description:** Automatically applies pre-built CSS/Canvas animations and maps local, royalty-free SFX (pops, whooshes) to graphic and caption entries.
+- **User Value:** Provides the dopamine-hitting "pattern interrupts" needed for audience retention.
+- **Success Criteria:**
+  - System injects audio files simultaneously with visual element triggers.
+- **Priority:** High
+
+### Future Features (Not in MVP)
+| Feature | Why Wait | Planned For |
+|---------|----------|-------------|
+| AI SFX Generation | Requires costly 3rd-party APIs (ElevenLabs) or heavy local generation. | Version 2 |
+| Multimodal Graphic Analysis (CLIP) | Heavy compute cost to run local vision models to bypass manual image tagging. | Version 2 |
+| AI Script/Prompt Generation | Feature creep; focus should remain on the core editing pipeline first. | Version 2 |
+
+## Success Metrics
+
+### Primary Metrics
+1. **Personal Brand Engagement:** Baseline vs. post-Splitty AI views/likes on published videos.
+   - How to measure: Native platform analytics (TikTok, Reels, Shorts).
+   - Why it matters: Proves the editing pacing and visual engagement actually work.
+
+2. **Local Processing Speed:** Time taken to render a 1-minute video.
+   - How to measure: Internal logging.
+   - Why it matters: Must be fast enough to be a viable alternative to cloud tools on standard laptops.
+
+## UI/UX Direction
+
+**Design Feel:** Simple, minimalist, developer-focused. Dark Mode by default.
+**Inspiration:** Clean, functional desktop tools (like Cursor or Linear).
+
+### Key Screens
+1. **The Workspace (Main Screen)**
+   - Purpose: Central hub for the entire workflow.
+   - Key Elements: Drag-and-drop zone for video, sidebar for dropping/tagging graphics, "Process" button, and a simple video preview player.
+   - User Actions: Upload media, assign text tags to graphics, initiate processing.
+
+### Design Principles
+- **Function over Flash:** The UI should get out of the way; the value is in the automated processing.
+- **Clear Status Indicators:** Since local processing takes time, clear progress bars for transcription, matching, and rendering are essential.
+
+## Technical Considerations
+
+**Platform:** Desktop Application (Likely Electron/Tauri with a local Python backend, or a purely local browser-based tool using Revideo).
+**Responsive:** Desktop-first, optimized for standard monitor resolutions.
+**Performance Goals:**
+- Must run on integrated graphics/standard CPUs (no reliance on massive VRAM).
+- Processing time should be less than 5x video length (e.g., 5 mins to process a 1-min video).
+
+**Security/Privacy:** 100% local. No data leaves the machine.
+
+## Constraints & Requirements
+
+### Budget
+- Development tools: $0
+- Hosting/Infrastructure: $0 (Local execution)
+- Third-party APIs: $0
+- **Total:** $0
+
+### Technical Constraints
+- Must rely exclusively on open-source, commercially viable (MIT/Apache 2.0) libraries.
+- Will likely need heavily quantized AI models (like `ggml` formatted Whisper) to ensure the laptop's CPU/RAM isn't overwhelmed.
+
+## Quality Standards
+
+**Code Quality:**
+- Use TypeScript for the UI to catch errors early.
+- Python backend must have clean, explicit error handling for media processing failures (FFmpeg can be finicky).
+
+**What This Project Will NOT Accept:**
+- Cloud dependencies. If the internet goes out, Splitty AI should still work.
+- "Black box" rendering. The user should be able to view and tweak the generated timeline before final export if desired.
+
+## MVP Completion Checklist
+
+### Development Complete
+- [ ] Video ingestion and silence cutting works.
+- [ ] Local Whisper transcription is functional.
+- [ ] Semantic matching accurately places graphics.
+- [ ] Animations and local SFX trigger correctly.
+- [ ] Final MP4 export is successful.
+
+### Launch Ready
+- [ ] Tested successfully on a 60-second raw video.
+- [ ] Processing runs without crashing the host machine.
+
+## Next Steps
+
+1. **Immediate:** Review and approve this PRD.
+2. **Next:** Create Technical Design Document (Part 3) to nail down the exact open-source libraries (e.g., Tauri vs. Electron, FFmpeg vs. Revideo).
+3. **Then:** Set up the local development environment.
+4. **Build:** Implement with AI assistance.
+5. **Launch:** Use it to post your first fully automated video!
