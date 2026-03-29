@@ -2,8 +2,10 @@ import { useEffect, useState, useCallback } from 'react'
 import UploadZone, { type FileMetadata } from './components/UploadZone'
 import FileCard from './components/FileCard'
 import ProcessButton from './components/ProcessButton'
+import ProgressBar from './components/ProgressBar'
 import TimelinePreview, { type TimelineData } from './components/TimelinePreview'
 import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
+import { useProcessPipeline, type PipelineConfig } from './hooks/useProcessPipeline'
 
 type EngineStatus = 'checking' | 'connected' | 'error'
 
@@ -12,21 +14,20 @@ type LoadedFile = {
   meta: FileMetadata
 }
 
-type ProcessResult = {
-  ok: boolean
-  data?: { timeline: TimelineData }
-  error?: string
+const DEFAULT_CONFIG: PipelineConfig = {
+  silenceThresholdMs: 500,
+  attentionLengthMs: 3000,
 }
 
 function App(): React.JSX.Element {
   const [engineStatus, setEngineStatus] = useState<EngineStatus>('checking')
   const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null)
   const [graphics, setGraphics] = useState<GraphicItem[]>([])
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [timeline, setTimeline] = useState<TimelineData | null>(null)
-  const [processError, setProcessError] = useState<string | null>(null)
+  const [config, setConfig] = useState<PipelineConfig>(DEFAULT_CONFIG)
+  const pipeline = useProcessPipeline()
 
-  useEffect(() => {
+  const checkEngine = useCallback(() => {
+    setEngineStatus('checking')
     window.electron
       .invoke('engine:health')
       .then((result) => {
@@ -36,17 +37,30 @@ function App(): React.JSX.Element {
       .catch(() => setEngineStatus('error'))
   }, [])
 
+  const handleReconnect = useCallback(() => {
+    setEngineStatus('checking')
+    window.electron
+      .invoke('engine:reconnect')
+      .then((result) => {
+        const r = result as { ok: boolean }
+        setEngineStatus(r.ok ? 'connected' : 'error')
+      })
+      .catch(() => setEngineStatus('error'))
+  }, [])
+
+  useEffect(() => {
+    checkEngine()
+  }, [checkEngine])
+
   const handleFileAccepted = useCallback((filePath: string, meta: FileMetadata) => {
     setLoadedFile({ filePath, meta })
-    setTimeline(null)
-    setProcessError(null)
-  }, [])
+    pipeline.reset()
+  }, [pipeline])
 
   const handleClear = useCallback(() => {
     setLoadedFile(null)
-    setTimeline(null)
-    setProcessError(null)
-  }, [])
+    pipeline.reset()
+  }, [pipeline])
 
   const handleAddGraphic = useCallback((graphic: GraphicItem) => {
     setGraphics((prev) => [...prev, graphic])
@@ -64,28 +78,13 @@ function App(): React.JSX.Element {
 
   const handleProcess = useCallback(async () => {
     if (!loadedFile) return
-    setIsProcessing(true)
-    setProcessError(null)
-    setTimeline(null)
+    pipeline.run(loadedFile.filePath, graphics, config)
+  }, [loadedFile, graphics, config, pipeline])
 
-    try {
-      const result = (await window.electron.invoke('engine:processVideo', {
-        videoPath: loadedFile.filePath,
-        graphics: graphics.map((g) => ({ filePath: g.filePath, tag: g.tag })),
-        silenceThresholdMs: 500,
-      })) as ProcessResult
-
-      if (result.ok && result.data) {
-        setTimeline(result.data.timeline)
-      } else {
-        setProcessError(result.error ?? 'Processing failed')
-      }
-    } catch (err) {
-      setProcessError(err instanceof Error ? err.message : 'IPC call failed')
-    } finally {
-      setIsProcessing(false)
-    }
-  }, [loadedFile, graphics])
+  const isProcessing =
+    pipeline.progress.stage !== 'idle' &&
+    pipeline.progress.stage !== 'done' &&
+    pipeline.progress.stage !== 'error'
 
   const statusColor: Record<EngineStatus, string> = {
     checking: 'text-yellow-500',
@@ -119,17 +118,78 @@ function App(): React.JSX.Element {
                 onClear={handleClear}
               />
 
-              <ProcessButton
-                onClick={handleProcess}
-                isProcessing={isProcessing}
-                disabled={engineStatus !== 'connected'}
-              />
+              {/* Config controls */}
+              <div className="mx-4 mt-3 flex items-center gap-4">
+                <label className="flex items-center gap-2 text-xs text-zinc-400">
+                  Silence threshold
+                  <input
+                    type="number"
+                    min={100}
+                    max={2000}
+                    step={100}
+                    value={config.silenceThresholdMs}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        silenceThresholdMs: Number(e.target.value),
+                      }))
+                    }
+                    disabled={isProcessing}
+                    className="w-20 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+                               focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
+                  />
+                  <span className="text-zinc-600">ms</span>
+                </label>
 
-              {processError && (
-                <p className="mx-4 mt-3 text-xs text-red-400">{processError}</p>
+                <label className="flex items-center gap-2 text-xs text-zinc-400">
+                  Attention length
+                  <input
+                    type="number"
+                    min={1000}
+                    max={10000}
+                    step={500}
+                    value={config.attentionLengthMs}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        attentionLengthMs: Number(e.target.value),
+                      }))
+                    }
+                    disabled={isProcessing}
+                    className="w-20 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+                               focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
+                  />
+                  <span className="text-zinc-600">ms</span>
+                </label>
+              </div>
+
+              <div className="mx-4 mt-3">
+                <ProcessButton
+                  onClick={handleProcess}
+                  isProcessing={isProcessing}
+                  disabled={engineStatus !== 'connected'}
+                />
+              </div>
+
+              {pipeline.progress.stage !== 'idle' && (
+                <ProgressBar progress={pipeline.progress} />
               )}
 
-              {timeline && <TimelinePreview timeline={timeline} />}
+              {pipeline.error && (
+                <div className="mx-4 mt-3 rounded-lg border border-red-900/50 bg-red-950/20 p-3">
+                  <p className="text-xs text-red-400">{pipeline.error}</p>
+                  <button
+                    onClick={handleProcess}
+                    className="mt-2 rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700 transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {pipeline.result && (
+                <TimelinePreview timeline={pipeline.result as unknown as TimelineData} />
+              )}
             </>
           ) : (
             <UploadZone onFileAccepted={handleFileAccepted} />
@@ -147,8 +207,18 @@ function App(): React.JSX.Element {
 
       {/* Status bar */}
       <footer className="flex items-center justify-between border-t border-zinc-800 px-4 py-1.5 text-xs text-zinc-600">
-        <span className={statusColor[engineStatus]}>
-          {statusLabel[engineStatus]}
+        <span className="flex items-center gap-2">
+          <span className={statusColor[engineStatus]}>
+            {statusLabel[engineStatus]}
+          </span>
+          {engineStatus === 'error' && (
+            <button
+              onClick={handleReconnect}
+              className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            >
+              Reconnect
+            </button>
+          )}
         </span>
         <span>Local processing</span>
       </footer>

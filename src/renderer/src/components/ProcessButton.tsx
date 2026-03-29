@@ -14,7 +14,7 @@ export default function ProcessButton({
       onClick={onClick}
       disabled={disabled || isProcessing}
       className={`
-        mx-4 rounded-lg px-6 py-2.5 text-sm font-medium transition-colors
+        w-full rounded-lg px-6 py-2.5 text-sm font-medium transition-colors
         ${
           disabled || isProcessing
             ? 'cursor-not-allowed bg-zinc-800 text-zinc-600'
@@ -23,7 +23,7 @@ export default function ProcessButton({
       `}
     >
       {isProcessing ? (
-        <span className="flex items-center gap-2">
+        <span className="flex items-center justify-center gap-2">
           <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-zinc-600 border-t-white" />
           Processing...
         </span>

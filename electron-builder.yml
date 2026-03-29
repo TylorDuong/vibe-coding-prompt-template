@@ -1,0 +1,35 @@
+appId: com.splittyai.app
+productName: Splitty AI
+copyright: Copyright © 2026
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - out/**/*
+
+extraResources:
+  - from: engine/
+    to: engine/
+    filter:
+      - "**/*.py"
+      - "sfx/**/*"
+      - "!tests/**"
+      - "!__pycache__/**"
+  - from: requirements.txt
+    to: requirements.txt
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: "${productName}-${version}-setup.${ext}"
+  signAndEditExecutable: false
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true

@@ -62,7 +62,16 @@ def detect_silence(
         "-f", "null", "-"
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        return EngineResult(ok=False, error="FFmpeg silence detection timed out after 5 minutes")
+    except FileNotFoundError:
+        return EngineResult(ok=False, error="FFmpeg not found. Please install FFmpeg and ensure it is on your PATH.")
+
+    if result.returncode != 0 and "Invalid data found" in result.stderr:
+        return EngineResult(ok=False, error=f"Unsupported video format or corrupt file: {os.path.basename(video_path)}")
+
     stderr = result.stderr
 
     silences: list[dict[str, float]] = []

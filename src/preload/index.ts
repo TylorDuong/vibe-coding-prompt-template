@@ -6,10 +6,13 @@ export type ElectronAPI = {
 
 const ALLOWED_CHANNELS = [
   'engine:health',
+  'engine:reconnect',
   'engine:ingest',
   'engine:processVideo',
   'engine:detectSilence',
   'engine:cutSilences',
+  'dialog:openVideo',
+  'dialog:openImages',
 ]
 
 const electronAPI: ElectronAPI = {

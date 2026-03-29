@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import TimelineBar from './TimelineBar'
+
 type TimelineSegment = {
   start: number
   end: number
@@ -53,21 +56,51 @@ const EVENT_STYLES: Record<string, { bg: string; label: string; color: string }>
   silence_cut: { bg: 'bg-red-950/30', label: 'CUT', color: 'text-red-400/70' },
 }
 
+function CollapsibleSection({
+  title,
+  count,
+  defaultOpen = false,
+  children,
+}: {
+  title: string
+  count: number
+  defaultOpen?: boolean
+  children: React.ReactNode
+}): React.JSX.Element {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors"
+      >
+        <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>
+          &#9654;
+        </span>
+        {title} ({count})
+      </button>
+      {open && <div className="mt-2">{children}</div>}
+    </div>
+  )
+}
+
 export default function TimelinePreview({ timeline }: TimelinePreviewProps): React.JSX.Element {
   const silences = timeline.silences ?? []
   const events = timeline.events ?? []
   const counts = timeline.eventCounts ?? {}
   const totalSilence = silences.reduce((sum, s) => sum + (s.end - s.start), 0)
+  const duration = timeline.video?.duration ?? 0
 
   return (
     <div className="m-4 space-y-4 overflow-auto rounded-lg border border-zinc-800 bg-zinc-900 p-4">
       <h3 className="text-sm font-medium text-zinc-300">Pipeline Result</h3>
 
-      {/* Summary bar */}
+      {/* Summary chips */}
       <div className="flex flex-wrap gap-2 text-xs">
-        {timeline.video?.duration != null && (
+        {duration > 0 && (
           <span className="rounded bg-zinc-800 px-2 py-1 text-zinc-400">
-            {timeline.video.duration.toFixed(1)}s
+            {duration.toFixed(1)}s
           </span>
         )}
         <span className="rounded bg-blue-900/40 px-2 py-1 text-blue-300">
@@ -84,13 +117,13 @@ export default function TimelinePreview({ timeline }: TimelinePreviewProps): Rea
         </span>
       </div>
 
-      {/* Event timeline */}
+      {/* Visual timeline bar */}
+      {duration > 0 && <TimelineBar events={events} duration={duration} />}
+
+      {/* Collapsible event list */}
       {events.length > 0 && (
-        <div>
-          <h4 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
-            Timeline Events ({events.length})
-          </h4>
-          <ul className="space-y-1 max-h-80 overflow-auto">
+        <CollapsibleSection title="Timeline Events" count={events.length} defaultOpen>
+          <ul className="space-y-1 max-h-60 overflow-auto">
             {events.map((evt, i) => {
               const style = EVENT_STYLES[evt.type] ?? {
                 bg: 'bg-zinc-800/50',
@@ -118,13 +151,32 @@ export default function TimelinePreview({ timeline }: TimelinePreviewProps): Rea
               )
             })}
           </ul>
-        </div>
+        </CollapsibleSection>
+      )}
+
+      {/* Collapsible transcript */}
+      {timeline.segments.length > 0 && (
+        <CollapsibleSection title="Transcript" count={timeline.segments.length}>
+          <ul className="space-y-1 max-h-48 overflow-auto">
+            {timeline.segments.map((seg, i) => (
+              <li
+                key={i}
+                className="flex items-baseline gap-2 rounded bg-zinc-800/50 px-3 py-1.5 text-xs"
+              >
+                <span className="font-mono text-zinc-500 shrink-0">
+                  {seg.start.toFixed(1)}s–{seg.end.toFixed(1)}s
+                </span>
+                <span className="text-zinc-300">{seg.text}</span>
+              </li>
+            ))}
+          </ul>
+        </CollapsibleSection>
       )}
 
       {/* Config */}
-      <div className="flex gap-4 text-xs text-zinc-600">
-        <span>Silence threshold: {timeline.silenceThresholdMs}ms</span>
-        <span>Attention length: 3000ms</span>
+      <div className="flex gap-4 text-xs text-zinc-600 pt-2 border-t border-zinc-800">
+        <span>Silence: {timeline.silenceThresholdMs}ms</span>
+        <span>Attention: 3000ms</span>
       </div>
     </div>
   )

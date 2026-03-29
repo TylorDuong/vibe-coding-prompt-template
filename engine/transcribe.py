@@ -30,7 +30,7 @@ def _extract_audio(video_path: str) -> str:
     """Extract audio from video to a temporary WAV file."""
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp.close()
-    subprocess.run(
+    result = subprocess.run(
         [
             "ffmpeg", "-y",
             "-i", video_path,
@@ -41,8 +41,18 @@ def _extract_audio(video_path: str) -> str:
             tmp.name,
         ],
         capture_output=True,
-        check=True,
     )
+    if result.returncode != 0:
+        os.unlink(tmp.name)
+        stderr = result.stderr.decode() if isinstance(result.stderr, bytes) else result.stderr
+        if "does not contain any stream" in stderr or "Output file is empty" in stderr:
+            raise RuntimeError("Video has no audio track. Transcription requires audio.")
+        raise RuntimeError(f"Audio extraction failed (FFmpeg exit {result.returncode})")
+
+    if os.path.getsize(tmp.name) == 0:
+        os.unlink(tmp.name)
+        raise RuntimeError("Extracted audio file is empty. The video may have no audible content.")
+
     return tmp.name
 
 
