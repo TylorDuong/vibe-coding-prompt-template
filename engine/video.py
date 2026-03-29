@@ -1,13 +1,18 @@
-"""FFmpeg-based video processing: ingestion, silence detection, and cutting."""
+"""FFmpeg-based video processing: ingestion, silence detection, cutting, thumbnails."""
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
 import tempfile
 
 from engine.result import EngineResult
+
+PADDING_SEC = 0.20
+MERGE_GAP_SEC = 0.30
+MIN_KEEP_SEC = 0.15
 
 
 def validate_input(video_path: str) -> EngineResult:
@@ -48,8 +53,8 @@ def validate_input(video_path: str) -> EngineResult:
 
 def detect_silence(
     video_path: str,
-    silence_threshold_db: int = -30,
-    min_silence_duration_ms: int = 500,
+    silence_threshold_db: int = -40,
+    min_silence_duration_ms: int = 800,
 ) -> EngineResult:
     """Run FFmpeg silencedetect and return a list of silent intervals."""
     if not video_path or not os.path.isfile(video_path):
@@ -108,8 +113,9 @@ def detect_silence(
 def cut_silences(
     video_path: str,
     output_path: str | None = None,
-    silence_threshold_db: int = -30,
-    min_silence_duration_ms: int = 500,
+    silence_threshold_db: int = -40,
+    min_silence_duration_ms: int = 800,
+    padding_ms: int = 200,
 ) -> EngineResult:
     """Detect silence, then produce a new video with silent segments removed."""
     detect_result = detect_silence(
@@ -133,7 +139,11 @@ def cut_silences(
             },
         )
 
+    padding_sec = padding_ms / 1000.0
     keep_segments = _invert_silences(silences, total_duration)
+    keep_segments = _pad_segments(keep_segments, padding_sec, total_duration)
+    keep_segments = _merge_close_segments(keep_segments, MERGE_GAP_SEC)
+    keep_segments = _drop_tiny_segments(keep_segments, MIN_KEEP_SEC)
 
     if not keep_segments:
         return EngineResult(ok=False, error="No audible segments found — entire file is silent")
@@ -142,7 +152,10 @@ def cut_silences(
         base, ext = os.path.splitext(video_path)
         output_path = f"{base}_cut{ext}"
 
-    _concat_segments(video_path, keep_segments, output_path)
+    try:
+        _filter_cut(video_path, keep_segments, output_path)
+    except Exception as exc:
+        return EngineResult(ok=False, error=f"Export failed: {exc}")
 
     new_duration = sum(s["end"] - s["start"] for s in keep_segments)
 
@@ -191,50 +204,111 @@ def _invert_silences(
     return keep
 
 
-def _concat_segments(
+def _pad_segments(
+    segments: list[dict[str, float]],
+    padding: float,
+    total_duration: float,
+) -> list[dict[str, float]]:
+    """Extend each segment by `padding` seconds on both sides, clamped to [0, total_duration]."""
+    padded: list[dict[str, float]] = []
+    for s in segments:
+        padded.append({
+            "start": max(0.0, s["start"] - padding),
+            "end": min(total_duration, s["end"] + padding),
+        })
+    return padded
+
+
+def _merge_close_segments(
+    segments: list[dict[str, float]],
+    max_gap: float,
+) -> list[dict[str, float]]:
+    """Merge segments that are closer than `max_gap` seconds apart (or overlapping)."""
+    if not segments:
+        return []
+
+    sorted_segs = sorted(segments, key=lambda s: s["start"])
+    merged: list[dict[str, float]] = [sorted_segs[0].copy()]
+
+    for seg in sorted_segs[1:]:
+        prev = merged[-1]
+        if seg["start"] - prev["end"] <= max_gap:
+            prev["end"] = max(prev["end"], seg["end"])
+        else:
+            merged.append(seg.copy())
+
+    return merged
+
+
+def _drop_tiny_segments(
+    segments: list[dict[str, float]],
+    min_duration: float,
+) -> list[dict[str, float]]:
+    """Remove segments shorter than `min_duration` seconds."""
+    return [s for s in segments if (s["end"] - s["start"]) >= min_duration]
+
+
+def _filter_cut(
     video_path: str,
     segments: list[dict[str, float]],
     output_path: str,
 ) -> None:
-    """Use FFmpeg concat demuxer to join kept segments."""
-    tmp_dir = tempfile.mkdtemp(prefix="splitty_")
-    segment_files: list[str] = []
+    """Use FFmpeg select/aselect filters to keep segments in a single pass."""
+    between_clauses = "+".join(
+        f"between(t\\,{s['start']:.3f}\\,{s['end']:.3f})" for s in segments
+    )
 
-    for i, seg in enumerate(segments):
-        seg_path = os.path.join(tmp_dir, f"seg_{i:04d}.ts")
+    vf = f"select='{between_clauses}',setpts=N/FRAME_RATE/TB"
+    af = f"aselect='{between_clauses}',asetpts=N/SR/TB"
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-vf", vf,
+        "-af", af,
+        output_path,
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        stderr_tail = result.stderr[-500:] if result.stderr else ""
+        raise RuntimeError(
+            f"FFmpeg exited with code {result.returncode}. {stderr_tail}"
+        )
+
+
+def generate_thumbnail(video_path: str, time_sec: float = 1.0) -> EngineResult:
+    """Extract a single frame from the video and return it as a base64 JPEG."""
+    if not video_path or not os.path.isfile(video_path):
+        return EngineResult(ok=False, error="Valid video_path required")
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    tmp.close()
+
+    try:
         subprocess.run(
             [
                 "ffmpeg", "-y",
+                "-ss", str(time_sec),
                 "-i", video_path,
-                "-ss", str(seg["start"]),
-                "-to", str(seg["end"]),
-                "-c", "copy",
-                "-avoid_negative_ts", "make_zero",
-                seg_path,
+                "-vframes", "1",
+                "-q:v", "5",
+                "-vf", "scale=320:-1",
+                tmp.name,
             ],
             capture_output=True,
-            check=True,
+            timeout=30,
         )
-        segment_files.append(seg_path)
 
-    concat_list = os.path.join(tmp_dir, "concat.txt")
-    with open(concat_list, "w") as f:
-        for sf in segment_files:
-            f.write(f"file '{sf}'\n")
+        if not os.path.isfile(tmp.name) or os.path.getsize(tmp.name) == 0:
+            return EngineResult(ok=False, error="Failed to extract thumbnail frame")
 
-    subprocess.run(
-        [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", concat_list,
-            "-c", "copy",
-            output_path,
-        ],
-        capture_output=True,
-        check=True,
-    )
+        with open(tmp.name, "rb") as f:
+            data = base64.b64encode(f.read()).decode("ascii")
 
-    for sf in segment_files:
-        os.remove(sf)
-    os.remove(concat_list)
-    os.rmdir(tmp_dir)
+        return EngineResult(ok=True, data={"thumbnail": f"data:image/jpeg;base64,{data}"})
+    except Exception as exc:
+        return EngineResult(ok=False, error=f"Thumbnail extraction failed: {exc}")
+    finally:
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)

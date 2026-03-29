@@ -6,7 +6,10 @@ import tempfile
 
 import pytest
 
-from engine.video import validate_input, detect_silence, cut_silences, _invert_silences
+from engine.video import (
+    validate_input, detect_silence, cut_silences,
+    _invert_silences, _pad_segments, _merge_close_segments, _drop_tiny_segments,
+)
 
 
 @pytest.fixture(scope="module")
@@ -87,3 +90,52 @@ def test_invert_silences_logic() -> None:
 def test_invert_silences_no_gaps() -> None:
     keep = _invert_silences([], 5.0)
     assert keep == [{"start": 0.0, "end": 5.0}]
+
+
+def test_pad_segments_extends_both_sides() -> None:
+    segments = [{"start": 1.0, "end": 2.0}, {"start": 4.0, "end": 5.0}]
+    padded = _pad_segments(segments, 0.2, 6.0)
+    assert padded[0]["start"] == pytest.approx(0.8)
+    assert padded[0]["end"] == pytest.approx(2.2)
+    assert padded[1]["start"] == pytest.approx(3.8)
+    assert padded[1]["end"] == pytest.approx(5.2)
+
+
+def test_pad_segments_clamps_to_bounds() -> None:
+    segments = [{"start": 0.05, "end": 4.95}]
+    padded = _pad_segments(segments, 0.2, 5.0)
+    assert padded[0]["start"] == 0.0
+    assert padded[0]["end"] == 5.0
+
+
+def test_merge_close_segments() -> None:
+    segments = [
+        {"start": 0.0, "end": 1.0},
+        {"start": 1.2, "end": 2.0},
+        {"start": 5.0, "end": 6.0},
+    ]
+    merged = _merge_close_segments(segments, 0.3)
+    assert len(merged) == 2
+    assert merged[0] == {"start": 0.0, "end": 2.0}
+    assert merged[1] == {"start": 5.0, "end": 6.0}
+
+
+def test_merge_overlapping_segments() -> None:
+    segments = [
+        {"start": 0.0, "end": 1.5},
+        {"start": 1.3, "end": 3.0},
+    ]
+    merged = _merge_close_segments(segments, 0.3)
+    assert len(merged) == 1
+    assert merged[0] == {"start": 0.0, "end": 3.0}
+
+
+def test_drop_tiny_segments() -> None:
+    segments = [
+        {"start": 0.0, "end": 0.05},
+        {"start": 1.0, "end": 2.0},
+        {"start": 3.0, "end": 3.1},
+    ]
+    kept = _drop_tiny_segments(segments, 0.15)
+    assert len(kept) == 1
+    assert kept[0] == {"start": 1.0, "end": 2.0}

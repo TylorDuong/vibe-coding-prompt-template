@@ -5,6 +5,7 @@ import ProcessButton from './components/ProcessButton'
 import ProgressBar from './components/ProgressBar'
 import TimelinePreview, { type TimelineData } from './components/TimelinePreview'
 import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
+import ExportButton from './components/ExportButton'
 import { useProcessPipeline, type PipelineConfig } from './hooks/useProcessPipeline'
 
 type EngineStatus = 'checking' | 'connected' | 'error'
@@ -15,7 +16,7 @@ type LoadedFile = {
 }
 
 const DEFAULT_CONFIG: PipelineConfig = {
-  silenceThresholdMs: 500,
+  silenceThresholdMs: 800,
   attentionLengthMs: 3000,
 }
 
@@ -188,7 +189,14 @@ function App(): React.JSX.Element {
               )}
 
               {pipeline.result && (
-                <TimelinePreview timeline={pipeline.result as unknown as TimelineData} />
+                <>
+                  <ExportButton
+                    videoPath={loadedFile.filePath}
+                    silenceThresholdMs={config.silenceThresholdMs}
+                    disabled={isProcessing}
+                  />
+                  <TimelinePreview timeline={pipeline.result as unknown as TimelineData} />
+                </>
               )}
             </>
           ) : (

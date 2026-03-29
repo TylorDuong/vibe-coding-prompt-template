@@ -122,26 +122,41 @@ export default function GraphicsSidebar({
       <div className="flex-1 overflow-auto p-3 space-y-2">
         {graphics.map((g) => (
           <div key={g.id} className="rounded-lg border border-zinc-800 bg-zinc-900 p-2.5">
-            <div className="flex items-center justify-between">
-              <span className="truncate text-xs text-zinc-300 max-w-[180px]">
-                {g.fileName}
-              </span>
-              <button
-                onClick={() => onRemove(g.id)}
-                className="ml-1 text-xs text-zinc-600 hover:text-red-400 transition-colors"
-                title="Remove"
-              >
-                x
-              </button>
+            <div className="flex gap-2">
+              {/* Image preview */}
+              <div className="shrink-0 h-12 w-12 rounded overflow-hidden bg-zinc-800">
+                <img
+                  src={`local-file://${encodeURIComponent(g.filePath)}`}
+                  alt={g.fileName}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none'
+                  }}
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <span className="truncate text-xs text-zinc-300 max-w-[140px]">
+                    {g.fileName}
+                  </span>
+                  <button
+                    onClick={() => onRemove(g.id)}
+                    className="ml-1 text-xs text-zinc-600 hover:text-red-400 transition-colors shrink-0"
+                    title="Remove"
+                  >
+                    x
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={g.tag}
+                  onChange={(e) => onTagChange(g.id, e.target.value)}
+                  placeholder="Describe this graphic..."
+                  className="mt-1 w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200
+                             placeholder:text-zinc-600 outline-none focus:ring-1 focus:ring-blue-500/50"
+                />
+              </div>
             </div>
-            <input
-              type="text"
-              value={g.tag}
-              onChange={(e) => onTagChange(g.id, e.target.value)}
-              placeholder="Describe this graphic..."
-              className="mt-1.5 w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200
-                         placeholder:text-zinc-600 outline-none focus:ring-1 focus:ring-blue-500/50"
-            />
           </div>
         ))}
       </div>

@@ -2,16 +2,6 @@
 
 Reads one JSON object per line from stdin, dispatches to the appropriate
 module, and writes one JSON response per line to stdout.
-
-Protocol:
-  → {"command": "health"}
-  ← {"ok": true, "data": {"status": "ok"}}
-
-  → {"command": "ingest", "videoPath": "..."}
-  ← {"ok": true, "data": {"filename": "...", ...}}
-
-  → {"command": "process", "videoPath": "...", "graphics": [...], "silenceThresholdMs": 500}
-  ← {"ok": true, "data": {"timeline": {...}}}
 """
 
 from __future__ import annotations
@@ -20,7 +10,8 @@ import json
 import sys
 
 from engine.result import EngineResult
-from engine.video import validate_input, detect_silence, cut_silences
+from engine.validation import validate_video_path, validate_output_path, sanitize_number
+from engine.video import validate_input, detect_silence, cut_silences, generate_thumbnail
 from engine.transcribe import transcribe
 from engine.match import semantic_match
 from engine.polish import build_events
@@ -33,27 +24,58 @@ def handle(message: dict) -> EngineResult:
         return EngineResult(ok=True, data={"status": "ok"})
 
     if command == "ingest":
-        return validate_input(message.get("videoPath", ""))
+        video_path = message.get("videoPath", "")
+        err = validate_video_path(video_path)
+        if err:
+            return err
+        return validate_input(video_path)
+
+    if command == "thumbnail":
+        video_path = message.get("videoPath", "")
+        err = validate_video_path(video_path)
+        if err:
+            return err
+        return generate_thumbnail(video_path)
 
     if command == "detectSilence":
+        video_path = message.get("videoPath", "")
+        err = validate_video_path(video_path)
+        if err:
+            return err
         return detect_silence(
-            message.get("videoPath", ""),
-            silence_threshold_db=message.get("silenceThresholdDb", -30),
-            min_silence_duration_ms=message.get("minSilenceDurationMs", 500),
+            video_path,
+            silence_threshold_db=int(sanitize_number(message.get("silenceThresholdDb"), -60, 0, -30)),
+            min_silence_duration_ms=int(sanitize_number(message.get("minSilenceDurationMs"), 100, 5000, 500)),
         )
 
     if command == "cutSilences":
+        video_path = message.get("videoPath", "")
+        err = validate_video_path(video_path)
+        if err:
+            return err
+        output_path = message.get("outputPath")
+        if output_path:
+            out_err = validate_output_path(output_path)
+            if out_err:
+                return out_err
         return cut_silences(
-            message.get("videoPath", ""),
-            output_path=message.get("outputPath"),
-            silence_threshold_db=message.get("silenceThresholdDb", -30),
-            min_silence_duration_ms=message.get("minSilenceDurationMs", 500),
+            video_path,
+            output_path=output_path,
+            silence_threshold_db=int(sanitize_number(message.get("silenceThresholdDb"), -60, 0, -30)),
+            min_silence_duration_ms=int(sanitize_number(message.get("minSilenceDurationMs"), 100, 5000, 500)),
         )
 
     if command == "process":
         video_path = message.get("videoPath", "")
+        err = validate_video_path(video_path)
+        if err:
+            return err
+
         graphics = message.get("graphics", [])
-        silence_ms = message.get("silenceThresholdMs", 500)
+        if not isinstance(graphics, list):
+            graphics = []
+
+        silence_ms = int(sanitize_number(message.get("silenceThresholdMs"), 100, 5000, 500))
 
         ingest_result = validate_input(video_path)
         if not ingest_result.ok:
@@ -98,6 +120,23 @@ def handle(message: dict) -> EngineResult:
                     "eventCounts": event_counts,
                 }
             },
+        )
+
+    if command == "export":
+        video_path = message.get("videoPath", "")
+        err = validate_video_path(video_path)
+        if err:
+            return err
+        output_path = message.get("outputPath", "")
+        out_err = validate_output_path(output_path)
+        if out_err:
+            return out_err
+        silence_ms = int(sanitize_number(message.get("silenceThresholdMs"), 100, 5000, 500))
+
+        return cut_silences(
+            video_path,
+            output_path=output_path,
+            min_silence_duration_ms=silence_ms,
         )
 
     return EngineResult(ok=False, error=f"Unknown command: {command}")

@@ -4,6 +4,7 @@ type FileMetadata = {
   filename: string
   size_bytes: number
   extension: string
+  duration?: number
 }
 
 type IngestResult = {
