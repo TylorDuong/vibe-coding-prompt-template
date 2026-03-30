@@ -45,8 +45,13 @@ type TimelineData = {
   eventCounts?: Record<string, number>
 }
 
+type WordTrigger = { start: number; word: string }
+
 type TimelinePreviewProps = {
   timeline: TimelineData
+  selectedGraphicId: string | null
+  wordTriggers: Record<string, WordTrigger>
+  onWordAssign: (payload: { start: number; end: number; word: string }) => void
 }
 
 const EVENT_STYLES: Record<string, { bg: string; label: string; color: string }> = {
@@ -85,7 +90,19 @@ function CollapsibleSection({
   )
 }
 
-export default function TimelinePreview({ timeline }: TimelinePreviewProps): React.JSX.Element {
+function isWordLinked(wStart: number, wText: string, triggers: Record<string, WordTrigger>): boolean {
+  const t = wText.trim()
+  return Object.values(triggers).some(
+    (tr) => Math.abs(tr.start - wStart) < 0.03 && tr.word === t,
+  )
+}
+
+export default function TimelinePreview({
+  timeline,
+  selectedGraphicId,
+  wordTriggers,
+  onWordAssign,
+}: TimelinePreviewProps): React.JSX.Element {
   const silences = timeline.silences ?? []
   const events = timeline.events ?? []
   const counts = timeline.eventCounts ?? {}
@@ -143,7 +160,8 @@ export default function TimelinePreview({ timeline }: TimelinePreviewProps): Rea
                   </span>
                   <span className="text-zinc-300 truncate">
                     {evt.type === 'caption' && evt.text}
-                    {evt.type === 'graphic' && `${evt.tag || evt.filePath} (sim=${evt.similarity?.toFixed(2)})`}
+                    {evt.type === 'graphic' &&
+                      `${evt.tag || evt.filePath} (${evt.similarity != null && evt.similarity >= 0.99 ? 'manual' : `sim=${evt.similarity?.toFixed(2)}`})`}
                     {evt.type === 'sfx' && `${evt.sfx} [${evt.trigger}]`}
                     {evt.type === 'silence_cut' && evt.end != null && `${evt.start.toFixed(1)}s–${evt.end.toFixed(1)}s removed`}
                   </span>
@@ -154,21 +172,75 @@ export default function TimelinePreview({ timeline }: TimelinePreviewProps): Rea
         </CollapsibleSection>
       )}
 
-      {/* Collapsible transcript */}
+      {/* Collapsible transcript — click words to place selected graphic */}
       {timeline.segments.length > 0 && (
-        <CollapsibleSection title="Transcript" count={timeline.segments.length}>
-          <ul className="space-y-1 max-h-48 overflow-auto">
-            {timeline.segments.map((seg, i) => (
-              <li
-                key={i}
-                className="flex items-baseline gap-2 rounded bg-zinc-800/50 px-3 py-1.5 text-xs"
-              >
-                <span className="font-mono text-zinc-500 shrink-0">
-                  {seg.start.toFixed(1)}s–{seg.end.toFixed(1)}s
-                </span>
-                <span className="text-zinc-300">{seg.text}</span>
-              </li>
-            ))}
+        <CollapsibleSection title="Transcript" count={timeline.segments.length} defaultOpen>
+          {!selectedGraphicId && (
+            <p className="mb-2 text-[10px] text-amber-500/90">
+              Select a graphic in the sidebar, then click a word here to set when it appears.
+            </p>
+          )}
+          <ul className="space-y-2 max-h-64 overflow-auto">
+            {timeline.segments.map((seg, i) => {
+              const words = seg.words
+              return (
+                <li
+                  key={i}
+                  className="rounded bg-zinc-800/50 px-3 py-1.5 text-xs leading-relaxed"
+                >
+                  <span className="mb-1 block font-mono text-zinc-500">
+                    {seg.start.toFixed(1)}s–{seg.end.toFixed(1)}s
+                  </span>
+                  {words && words.length > 0 ? (
+                    <span className="text-zinc-300">
+                      {words.map((w, wi) => {
+                        const raw = w.word ?? ''
+                        const display = raw.trim() || '·'
+                        const isLinked = isWordLinked(w.start, raw, wordTriggers)
+                        return (
+                          <button
+                            key={`${i}-${wi}-${w.start}`}
+                            type="button"
+                            disabled={!selectedGraphicId}
+                            title={
+                              selectedGraphicId
+                                ? 'Place selected graphic at this word'
+                                : 'Select a graphic in the sidebar first'
+                            }
+                            onClick={() =>
+                              onWordAssign({
+                                start: w.start,
+                                end: w.end,
+                                word: raw.trim() || display,
+                              })
+                            }
+                            className={`
+                              mx-0.5 inline rounded px-0.5 py-0.5 align-baseline
+                              transition-colors
+                              ${
+                                selectedGraphicId
+                                  ? 'cursor-pointer hover:bg-blue-600/40 hover:text-white'
+                                  : 'cursor-default opacity-80'
+                              }
+                              ${isLinked ? 'bg-emerald-900/50 text-emerald-200' : ''}
+                            `}
+                          >
+                            {display}
+                          </button>
+                        )
+                      })}
+                    </span>
+                  ) : (
+                    <span className="text-zinc-400">
+                      {seg.text}
+                      <span className="mt-1 block text-[10px] text-zinc-600">
+                        No word-level timings in this segment; process again or use a clip with clearer speech.
+                      </span>
+                    </span>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </CollapsibleSection>
       )}

@@ -12,6 +12,7 @@ from engine.render import (
     render_full,
     source_time_to_output,
     remap_interval,
+    _overlay_dims_uniform,
 )
 
 
@@ -138,3 +139,17 @@ def test_render_full_captions_only(test_video_with_audio: str) -> None:
     finally:
         if os.path.exists(out.name):
             os.unlink(out.name)
+
+
+def test_overlay_dims_square_on_vertical_frame() -> None:
+    """9:16 frame, square image: output must stay square at ~95% frame width."""
+    ow, oh = _overlay_dims_uniform(1080, 1920, 1000, 1000, 0.95)
+    assert ow == oh
+    assert ow == 1026
+
+
+def test_overlay_dims_tall_on_vertical_frame() -> None:
+    """Very tall image: height hits frame_h first, width shrinks."""
+    ow, oh = _overlay_dims_uniform(1080, 1920, 400, 2000, 0.95)
+    assert oh == 1920
+    assert ow == 384

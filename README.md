@@ -8,7 +8,25 @@ Local-first desktop app that automates short-form video editing — silence cutt
 
 - **Node.js** 18+ and **npm**
 - **Python** 3.10+ (with pip)
-- **FFmpeg** on your PATH (`winget install Gyan.FFmpeg` on Windows)
+- **FFmpeg** on your PATH — required for silence detection, audio extraction, and full export (see below)
+
+### FFmpeg
+
+Install a full build that includes `ffmpeg` and `ffprobe`, then confirm the shell sees them (`ffmpeg -version`).
+
+| OS | Suggested install |
+|----|-------------------|
+| Windows | `winget install Gyan.FFmpeg` (adds `%LOCALAPPDATA%\Microsoft\WinGet\Links` to PATH) |
+| macOS | `brew install ffmpeg` |
+| Linux | `apt install ffmpeg` / your distro equivalent |
+
+**After installing or updating PATH**, open a **new** terminal and restart the dev app (`npm run dev`) so the Python engine inherits the updated environment.
+
+**Windows export / captions:** Some FFmpeg builds log `Fontconfig error` and can crash during burn-in captions. The engine avoids that by using a system font under `%WINDIR%\Fonts` (e.g. Segoe UI, Arial). To force a specific font file, set:
+
+`SPLITTY_FFMPEG_FONT=C:\path\to\YourFont.ttf`
+
+then restart the app.
 
 ### Setup
 
@@ -40,7 +58,7 @@ Opens the Electron app with hot-reloading. The Python engine starts automaticall
 ### Testing
 
 ```bash
-# Python engine tests (30 tests)
+# Python engine tests
 python -m pytest engine/tests/ -v
 
 # Frontend build check

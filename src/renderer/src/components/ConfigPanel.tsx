@@ -92,7 +92,7 @@ const PARAMS: ParamDef[] = [
   {
     key: 'graphicWidthPercent',
     label: 'Graphic width',
-    tooltip: 'Maximum width of overlaid graphics as a percentage of the video width. The image keeps aspect ratio and is centered; tall images scale down to fit this width cap.',
+    tooltip: 'Target width of each overlaid graphic as a percentage of the video frame (uniform scale, image aspect ratio preserved, centered). If that width would make the graphic taller than the frame, it shrinks so it still fits vertically.',
     min: 10,
     max: 100,
     step: 5,

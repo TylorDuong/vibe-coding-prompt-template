@@ -127,9 +127,7 @@ export function useProcessPipeline() {
         updateStage('transcribing')
         const transcribeResult = (await window.electron.invoke('engine:processVideo', {
           videoPath,
-          graphics: graphics
-            .filter((g) => g.tag.trim())
-            .map((g) => ({ filePath: g.filePath, tag: g.tag })),
+          graphics: graphics.map((g) => ({ filePath: g.filePath, tag: g.tag })),
           silenceThresholdDb: config.silenceThresholdDb,
           minSilenceDurationMs: config.minSilenceDurationMs,
           paddingMs: config.paddingMs,
