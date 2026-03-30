@@ -77,8 +77,8 @@ export default function SfxPoolPanel({ slots, onUpdate }: SfxPoolPanelProps): Re
         Sound Effects Pool
       </h3>
       <p className="text-[10px] text-zinc-600 mb-2 leading-relaxed">
-        Each slot maps to how the engine uses SFX: graphic match (whoosh), new caption line (pop),
-        end of a silence cut (cut), and pacing fills in long gaps (chime).
+        Import your own files for each cue. Nothing plays until a slot has a file and a trigger
+        other than Disabled.
       </p>
       <div className="space-y-2.5">
         {slots.map((slot) => (
@@ -143,7 +143,7 @@ export const DEFAULT_SFX_SLOTS: SfxSlot[] = [
   {
     id: 'whoosh',
     label: 'Whoosh SFX',
-    description: 'Graphic appears (engine default: whoosh)',
+    description: 'When a matched graphic appears',
     trigger: 'graphic_entry',
     filePath: null,
     fileName: null,
@@ -151,7 +151,7 @@ export const DEFAULT_SFX_SLOTS: SfxSlot[] = [
   {
     id: 'pop',
     label: 'Pop SFX',
-    description: 'Caption line starts (engine default: pop)',
+    description: 'When a caption line starts',
     trigger: 'caption_entry',
     filePath: null,
     fileName: null,
@@ -159,7 +159,7 @@ export const DEFAULT_SFX_SLOTS: SfxSlot[] = [
   {
     id: 'cut',
     label: 'Cut SFX',
-    description: 'Speech resumes after silence cut',
+    description: 'When speech resumes after a cut',
     trigger: 'silence_cut',
     filePath: null,
     fileName: null,
@@ -167,7 +167,7 @@ export const DEFAULT_SFX_SLOTS: SfxSlot[] = [
   {
     id: 'chime',
     label: 'Chime SFX',
-    description: 'Attention fill in long gaps (engine default: pop/chime)',
+    description: 'Attention fill in long visual gaps',
     trigger: 'attention_fill',
     filePath: null,
     fileName: null,

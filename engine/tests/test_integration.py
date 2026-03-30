@@ -115,6 +115,32 @@ def test_full_process_with_graphics(test_video: str) -> None:
     assert len(timeline["events"]) > 0
 
 
+def test_process_uses_precached_silences_skips_redetect(test_video: str) -> None:
+    """When client passes silences[], engine should not need a second silencedetect pass."""
+    det = handle({
+        "command": "detectSilence",
+        "videoPath": test_video,
+        "silenceThresholdDb": -30,
+        "minSilenceDurationMs": 500,
+    })
+    assert det.ok is True
+    cached = det.data["silences"]
+
+    result = handle({
+        "command": "process",
+        "videoPath": test_video,
+        "graphics": [],
+        "silenceThresholdDb": -30,
+        "minSilenceDurationMs": 500,
+        "silences": cached,
+        "totalDuration": 5.0,
+        "attentionLengthMs": 3000,
+    })
+    assert result.ok is True
+    timeline = result.data["timeline"]
+    assert timeline["silences"] == cached
+
+
 def test_full_pipeline_json_roundtrip(test_video: str) -> None:
     """Verify the result is JSON-serializable (as it would be over IPC)."""
     result = handle({

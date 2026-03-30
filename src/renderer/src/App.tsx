@@ -26,6 +26,7 @@ const DEFAULT_CONFIG: PipelineConfig = {
   attentionLengthMs: 3000,
   maxWords: 3,
   graphicDisplaySec: 2,
+  graphicWidthPercent: 85,
 }
 
 function App(): React.JSX.Element {

@@ -13,7 +13,19 @@ let buffer = ''
 const pendingQueue: PendingRequest[] = []
 let restartAttempts = 0
 const MAX_RESTART_ATTEMPTS = 3
-const REQUEST_TIMEOUT_MS = 120_000
+
+/** Default for quick commands (health, ingest, thumbnail, detectSilence). */
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000
+
+/**
+ * Transcription (faster-whisper), SBERT matching, and full FFmpeg export can run many
+ * minutes on CPU — a single global short timeout falsely reports "stuck" for normal work.
+ */
+export const LONG_ENGINE_TIMEOUT_MS = 45 * 60 * 1000
+
+export type SendToEngineOptions = {
+  timeoutMs?: number
+}
 
 function getPythonPath(): string {
   return 'python'
@@ -95,7 +107,10 @@ export function isEngineRunning(): boolean {
   return pythonProcess !== null && !pythonProcess.killed
 }
 
-export function sendToEngine(payload: Record<string, unknown>): Promise<unknown> {
+export function sendToEngine(
+  payload: Record<string, unknown>,
+  options?: SendToEngineOptions,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!pythonProcess?.stdin?.writable) {
       reject(new Error(
@@ -105,14 +120,16 @@ export function sendToEngine(payload: Record<string, unknown>): Promise<unknown>
       return
     }
 
+    const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+
     const timeoutId = setTimeout(() => {
       const idx = pendingQueue.findIndex((p) => p.timeoutId === timeoutId)
       if (idx >= 0) pendingQueue.splice(idx, 1)
       reject(new Error(
-        `Engine request timed out after ${REQUEST_TIMEOUT_MS / 1000}s. ` +
+        `Engine request timed out after ${timeoutMs / 1000}s. ` +
         'The operation may be too heavy for your hardware, or the engine is stuck.'
       ))
-    }, REQUEST_TIMEOUT_MS)
+    }, timeoutMs)
 
     pendingQueue.push({ resolve, reject, timeoutId })
 

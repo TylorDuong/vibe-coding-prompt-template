@@ -1,27 +1,17 @@
-"""Timeline enrichment: insert animation triggers and SFX cues.
+"""Timeline enrichment: insert SFX cue markers and cut markers.
 
 Walks the raw timeline and produces a flat list of timed events
 (captions, graphics, sfx, cuts) that the renderer can consume.
+
+SFX events carry only a trigger type; playback uses files from the user SFX pool
+in the exporter (no bundled placeholder audio).
 """
 
 from __future__ import annotations
 
-import os
-import random
 from typing import Any
 
 from engine.result import EngineResult
-
-SFX_DIR = os.path.join(os.path.dirname(__file__), "sfx")
-
-SFX_FILES = {
-    "pop": os.path.join(SFX_DIR, "pop.wav"),
-    "whoosh": os.path.join(SFX_DIR, "whoosh.wav"),
-    "chime": os.path.join(SFX_DIR, "chime.wav"),
-}
-
-GRAPHIC_SFX_POOL = ["whoosh", "pop"]
-CAPTION_SFX_POOL = ["pop", "chime"]
 
 
 def build_events(
@@ -36,7 +26,7 @@ def build_events(
     Event types:
       - caption: a transcript segment to display
       - graphic: a matched graphic to overlay
-      - sfx: sound effect cue (trigger: caption_entry, graphic_entry, silence_cut, attention_fill)
+      - sfx: sound cue (trigger only; user must assign audio in the SFX pool to hear it)
       - silence_cut: a removed silence interval
     """
     events: list[dict[str, Any]] = []
@@ -49,12 +39,9 @@ def build_events(
             "text": seg.get("text", ""),
             "words": seg.get("words", []),
         })
-        cap_sfx = "pop"
         events.append({
             "type": "sfx",
             "start": seg["start"],
-            "sfx": cap_sfx,
-            "sfx_path": SFX_FILES.get(cap_sfx, ""),
             "trigger": "caption_entry",
         })
 
@@ -71,16 +58,12 @@ def build_events(
             "similarity": m.get("similarity", 0),
             "animation": "slide_in",
         })
-        sfx_name = random.choice(GRAPHIC_SFX_POOL)
         events.append({
             "type": "sfx",
             "start": t,
-            "sfx": sfx_name,
-            "sfx_path": SFX_FILES.get(sfx_name, ""),
             "trigger": "graphic_entry",
         })
 
-    cut_sfx = "whoosh"
     for s in silences:
         events.append({
             "type": "silence_cut",
@@ -90,8 +73,6 @@ def build_events(
         events.append({
             "type": "sfx",
             "start": s["end"],
-            "sfx": cut_sfx,
-            "sfx_path": SFX_FILES.get(cut_sfx, ""),
             "trigger": "silence_cut",
         })
 
@@ -114,7 +95,7 @@ def _inject_attention_sfx(
     total_duration: float,
     attention_length_ms: int,
 ) -> list[dict[str, Any]]:
-    """Insert SFX at gaps longer than attention_length to maintain pacing."""
+    """Insert attention-fill SFX markers at gaps longer than attention_length."""
     if total_duration <= 0 or attention_length_ms <= 0:
         return events
 
@@ -134,12 +115,9 @@ def _inject_attention_sfx(
         gap = t - prev
         if gap > attention_sec:
             inject_at = prev + attention_sec
-            sfx_name = random.choice(CAPTION_SFX_POOL)
             extra.append({
                 "type": "sfx",
                 "start": inject_at,
-                "sfx": sfx_name,
-                "sfx_path": SFX_FILES.get(sfx_name, ""),
                 "trigger": "attention_fill",
             })
         prev = t

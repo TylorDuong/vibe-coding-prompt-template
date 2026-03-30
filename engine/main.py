@@ -84,15 +84,35 @@ def handle(message: dict) -> EngineResult:
         padding_ms = int(sanitize_number(message.get("paddingMs"), 0, 1000, 200))
         merge_gap_ms = int(sanitize_number(message.get("mergeGapMs"), 0, 2000, 300))
         min_keep_ms = int(sanitize_number(message.get("minKeepMs"), 0, 1000, 150))
+        attention_ms = int(sanitize_number(message.get("attentionLengthMs"), 500, 60000, 3000))
 
         ingest_result = validate_input(video_path)
         if not ingest_result.ok:
             return ingest_result
 
-        total_duration = (ingest_result.data or {}).get("duration", 0) or 0
+        ingest_duration = float((ingest_result.data or {}).get("duration", 0) or 0)
+        total_duration = float(sanitize_number(message.get("totalDuration"), 0, 86400 * 4, 0))
+        if total_duration <= 0:
+            total_duration = ingest_duration
 
-        silence_result = detect_silence(video_path, silence_threshold_db=silence_db, min_silence_duration_ms=silence_ms)
-        silences = silence_result.data.get("silences", []) if silence_result.ok and silence_result.data else []
+        pre_silences = message.get("silences")
+        if isinstance(pre_silences, list):
+            silences = []
+            for item in pre_silences:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    silences.append({
+                        "start": float(item["start"]),
+                        "end": float(item["end"]),
+                    })
+                except (KeyError, TypeError, ValueError):
+                    continue
+        else:
+            silence_result = detect_silence(
+                video_path, silence_threshold_db=silence_db, min_silence_duration_ms=silence_ms
+            )
+            silences = silence_result.data.get("silences", []) if silence_result.ok and silence_result.data else []
 
         transcript_result = transcribe(video_path)
         if not transcript_result.ok:
@@ -110,7 +130,7 @@ def handle(message: dict) -> EngineResult:
             matches=matches_list,
             silences=silences,
             total_duration=total_duration,
-            attention_length_ms=3000,
+            attention_length_ms=attention_ms,
         )
         events = polish_result.data["events"] if polish_result.ok and polish_result.data else []
         event_counts = polish_result.data.get("event_counts", {}) if polish_result.ok and polish_result.data else {}
@@ -151,6 +171,8 @@ def handle(message: dict) -> EngineResult:
         min_keep_ms = int(sanitize_number(message.get("minKeepMs"), 0, 1000, 150))
         attention_ms = int(sanitize_number(message.get("attentionLengthMs"), 500, 60000, 3000))
         graphic_sec = float(sanitize_number(message.get("graphicDisplaySec"), 0.5, 30.0, 2.0))
+        graphic_w_pct = float(sanitize_number(message.get("graphicWidthPercent"), 10.0, 100.0, 85.0))
+        graphic_width_frac = graphic_w_pct / 100.0
 
         silence_result = detect_silence(video_path, silence_threshold_db=silence_db, min_silence_duration_ms=silence_ms)
         total_duration = silence_result.data.get("total_duration", 0) if silence_result.ok and silence_result.data else 0
@@ -185,6 +207,7 @@ def handle(message: dict) -> EngineResult:
             events=events,
             max_words=max_words,
             graphic_display_sec=graphic_sec,
+            graphic_width_frac=graphic_width_frac,
         )
         if result.ok and result.data is not None:
             new_dur = sum(float(s["end"]) - float(s["start"]) for s in keep_segments)

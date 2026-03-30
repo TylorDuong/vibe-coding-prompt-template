@@ -67,6 +67,7 @@ export default function ExportVideoButton({
         minKeepMs: config.minKeepMs,
         attentionLengthMs: config.attentionLengthMs,
         graphicDisplaySec: config.graphicDisplaySec,
+        graphicWidthPercent: config.graphicWidthPercent,
       })) as ExportResult
 
       if (exportResult.ok && exportResult.data) {

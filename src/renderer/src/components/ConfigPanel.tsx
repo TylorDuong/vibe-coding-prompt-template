@@ -89,6 +89,15 @@ const PARAMS: ParamDef[] = [
     step: 0.5,
     unit: 's',
   },
+  {
+    key: 'graphicWidthPercent',
+    label: 'Graphic width',
+    tooltip: 'Maximum width of overlaid graphics as a percentage of the video width. The image keeps aspect ratio and is centered; tall images scale down to fit this width cap.',
+    min: 10,
+    max: 100,
+    step: 5,
+    unit: '%',
+  },
 ]
 
 function Tooltip({ text }: { text: string }): React.JSX.Element {

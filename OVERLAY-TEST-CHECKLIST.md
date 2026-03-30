@@ -3,10 +3,10 @@
 ## Test 1: Captions Only (No Graphics, No SFX)
 1. Open Splitty AI (`npm run dev`)
 2. Choose a video file with speech
-3. Leave graphics sidebar empty, leave SFX slots empty
+3. Leave graphics sidebar empty, leave SFX slots empty (or all triggers Disabled)
 4. Click "Process Video" — wait for pipeline to complete
 5. Set "Max words" to 3 in the config panel
-6. Click "Full Export (Captions + Graphics + SFX)"
+6. Click **Export Video**
 7. Save the output MP4
 
 **Verify:**
@@ -22,29 +22,28 @@
 3. Tag each image with a keyword that relates to your speech
 4. Click "Process Video" again
 5. Verify the Timeline Events show "GRAPHIC" entries with similarity > 0
-6. Click "Full Export"
+6. Adjust **Graphic width** (% of frame width, default 85%) and **Graphic length** (on-screen seconds) as needed
+7. Click **Export Video**
 
 **Verify:**
 - [ ] Graphics appear overlaid on the video at the matched timestamps
-- [ ] Graphics are centered and scaled to ~1/3 of video width
-- [ ] Graphics disappear after their segment ends
-- [ ] Captions still render correctly underneath
+- [ ] Graphics are centered; width matches **Graphic width** % of the video (aspect ratio preserved)
+- [ ] Graphics disappear after their on-screen window ends
+- [ ] Captions still render correctly
 
 ## Test 3: Captions + SFX
 1. Process a video
-2. Import a WAV/MP3 file into the "Swoosh SFX" slot
-3. Set its trigger to "When graphic shows" or "When caption shows"
-4. Click "Full Export"
+2. Import a WAV/MP3 into a SFX slot and set a trigger (e.g. When caption shows)
+3. Click **Export Video**
 
 **Verify:**
-- [ ] SFX audio plays at the trigger timestamp
+- [ ] SFX audio plays only for slots you imported (no bundled placeholder sounds)
 - [ ] SFX is mixed with the original audio (not replacing it)
 - [ ] Volume levels are reasonable (SFX doesn't overpower speech)
 
 ## Test 4: Full Pipeline (Captions + Graphics + SFX)
-1. Load video, add graphics with tags, import SFX files
-2. Configure all triggers
-3. Process and Full Export
+1. Load video, add graphics with tags, import SFX files and configure triggers
+2. Process and **Export Video**
 
 **Verify:**
 - [ ] All three overlay types render in the exported video

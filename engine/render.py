@@ -114,9 +114,6 @@ def _resolve_sfx_path(event: dict[str, Any], sfx_pool: dict[str, str]) -> str:
     pool_path = sfx_pool.get(trigger, "")
     if pool_path and os.path.isfile(pool_path):
         return pool_path
-    builtin = event.get("sfx_path", "")
-    if isinstance(builtin, str) and builtin and os.path.isfile(builtin):
-        return builtin
     return ""
 
 
@@ -195,6 +192,7 @@ def render_full(
     events: list[dict[str, Any]],
     max_words: int = 3,
     graphic_display_sec: float = 2.0,
+    graphic_width_frac: float = 0.85,
 ) -> EngineResult:
     """Render the final video with captions, graphics, and SFX overlaid."""
     if not video_path or not os.path.isfile(video_path):
@@ -232,6 +230,7 @@ def render_full(
             caption_chunks,
             graphic_inputs,
             sfx_plays,
+            graphic_width_frac=max(0.1, min(float(graphic_width_frac), 1.0)),
         )
     except Exception as exc:
         return EngineResult(ok=False, error=f"Full export failed: {exc}")
@@ -254,6 +253,7 @@ def _run_render(
     caption_chunks: list[dict[str, Any]],
     graphic_inputs: list[dict[str, Any]],
     sfx_plays: list[tuple[str, int]],
+    graphic_width_frac: float = 0.85,
 ) -> None:
     """Build and execute the FFmpeg command."""
     between_clauses = "+".join(
@@ -299,7 +299,8 @@ def _run_render(
     next_idx = 1
 
     for g in graphic_inputs:
-        inputs.extend(["-i", g["filePath"]])
+        # Still images decode as a single frame; loop + fps so overlay enable= has frames to show.
+        inputs.extend(["-loop", "1", "-framerate", "30", "-i", g["filePath"]])
         next_idx += 1
 
     sfx_argv, sfx_audio_parts, after_sfx_idx = _build_sfx_audio_filters(
@@ -309,15 +310,22 @@ def _run_render(
     )
     inputs.extend(sfx_argv)
 
+    wfrac = f"{graphic_width_frac:.6f}".rstrip("0").rstrip(".")
+    scale_w_expr = f"min(iw\\,main_w*{wfrac})"
+
     fc_video = f"[0:v]{vf_inner}[vbase]"
     current = "vbase"
     for i, g in enumerate(graphic_inputs):
         inp_idx = 1 + i
         enable = f"between(t\\,{g['start']:.3f}\\,{g['end']:.3f})"
         out_lab = f"vo{i}"
+        vb = f"vb{i}"
+        gs = f"gs{i}"
+        # scale2ref: input #0 = scaled stream (graphic), #1 = reference (main video)
         fc_video += (
-            f";[{inp_idx}:v]scale=iw/3:-1[gs{i}]"
-            f";[{current}][gs{i}]overlay="
+            f";[{inp_idx}:v][{current}]scale2ref=w={scale_w_expr}:h=-1:"
+            f"force_original_aspect_ratio=decrease[{gs}][{vb}]"
+            f";[{vb}][{gs}]overlay="
             f"x=(W-w)/2:y=(H-h)/2"
             f":enable='{enable}'"
             f"[{out_lab}]"
@@ -328,13 +336,15 @@ def _run_render(
     audio_fc = [af_main] + sfx_audio_parts
     filter_complex = ";".join([fc_video] + audio_fc)
 
-    cmd = (
+    cmd: list[str] = (
         ["ffmpeg", "-y"]
         + inputs
         + ["-filter_complex", filter_complex]
         + ["-map", f"[{current}]", "-map", "[outa]"]
-        + [output_path]
     )
+    if graphic_inputs:
+        cmd.append("-shortest")
+    cmd.append(output_path)
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
     if result.returncode != 0:

@@ -68,9 +68,10 @@ def transcribe(video_path: str) -> EngineResult:
     try:
         audio_path = _extract_audio(video_path)
         model = _get_model()
+        # beam_size=1 is much faster on CPU than beam_size=5; avoid vad_filter so odd/short clips still transcribe
         raw_segments, info = model.transcribe(
             audio_path,
-            beam_size=5,
+            beam_size=1,
             word_timestamps=True,
         )
 

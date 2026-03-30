@@ -35,6 +35,8 @@ export type PipelineConfig = {
   maxWords: number
   /** Max seconds each graphic stays on screen during full export */
   graphicDisplaySec: number
+  /** Max graphic width as % of video width (centered) */
+  graphicWidthPercent: number
 }
 
 export type PipelineResult = {
@@ -105,19 +107,23 @@ export function useProcessPipeline() {
         if (!ingestResult.ok) throw new Error(ingestResult.error ?? 'Ingest failed')
         if (cancelledRef.current) return
 
-        // Stage 2: Silence detection
+        const videoDuration =
+          typeof ingestResult.data?.duration === 'number' ? ingestResult.data.duration : 0
+
+        // Stage 2: Silence detection (full FFmpeg pass — do not repeat inside process)
         updateStage('detecting_silence')
         const silenceResult = (await window.electron.invoke('engine:detectSilence', {
           videoPath,
           silenceThresholdDb: config.silenceThresholdDb,
           minSilenceDurationMs: config.minSilenceDurationMs,
         })) as StageResult
-        const silences = silenceResult.ok && silenceResult.data
-          ? (silenceResult.data.silences as Record<string, unknown>[]) ?? []
-          : []
+        if (!silenceResult.ok) {
+          throw new Error(silenceResult.error ?? 'Silence detection failed')
+        }
+        const silences = (silenceResult.data?.silences as Record<string, unknown>[]) ?? []
         if (cancelledRef.current) return
 
-        // Stage 3: Transcribe
+        // Stage 3: Transcribe + match + polish (engine skips duplicate silence detect when silences are sent)
         updateStage('transcribing')
         const transcribeResult = (await window.electron.invoke('engine:processVideo', {
           videoPath,
@@ -129,6 +135,9 @@ export function useProcessPipeline() {
           paddingMs: config.paddingMs,
           mergeGapMs: config.mergeGapMs,
           minKeepMs: config.minKeepMs,
+          attentionLengthMs: config.attentionLengthMs,
+          silences,
+          totalDuration: videoDuration,
         })) as StageResult
 
         if (!transcribeResult.ok) {

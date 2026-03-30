@@ -1,5 +1,5 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
-import { sendToEngine, startPythonEngine, isEngineRunning } from './pythonBridge'
+import { sendToEngine, startPythonEngine, isEngineRunning, LONG_ENGINE_TIMEOUT_MS } from './pythonBridge'
 import { existsSync } from 'fs'
 import { resolve, isAbsolute } from 'path'
 
@@ -118,16 +118,25 @@ export function registerIpcHandlers(): void {
     const videoPath = validateFilePath(p.videoPath)
     if (!videoPath) return ipcError('Invalid or missing video file path.')
 
-    return sendToEngine({
-      command: 'process',
-      videoPath,
-      graphics: Array.isArray(p.graphics) ? p.graphics : [],
-      silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -40),
-      minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 800),
-      paddingMs: clampNumber(p.paddingMs, 0, 1000, 200),
-      mergeGapMs: clampNumber(p.mergeGapMs, 0, 2000, 300),
-      minKeepMs: clampNumber(p.minKeepMs, 0, 1000, 150),
-    })
+    const silences = Array.isArray(p.silences) ? p.silences : undefined
+    const totalDuration = typeof p.totalDuration === 'number' ? p.totalDuration : undefined
+
+    return sendToEngine(
+      {
+        command: 'process',
+        videoPath,
+        graphics: Array.isArray(p.graphics) ? p.graphics : [],
+        silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -40),
+        minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 800),
+        paddingMs: clampNumber(p.paddingMs, 0, 1000, 200),
+        mergeGapMs: clampNumber(p.mergeGapMs, 0, 2000, 300),
+        minKeepMs: clampNumber(p.minKeepMs, 0, 1000, 150),
+        attentionLengthMs: clampNumber(p.attentionLengthMs, 500, 60000, 3000),
+        ...(silences !== undefined ? { silences } : {}),
+        ...(totalDuration !== undefined && totalDuration > 0 ? { totalDuration } : {}),
+      },
+      { timeoutMs: LONG_ENGINE_TIMEOUT_MS },
+    )
   })
 
   ipcMain.handle('engine:detectSilence', async (_event, payload: unknown) => {
@@ -165,21 +174,25 @@ export function registerIpcHandlers(): void {
     const outputPath = validateOutputPath(p.outputPath)
     if (!outputPath) return ipcError('Invalid or missing output file path.')
 
-    return sendToEngine({
-      command: 'exportFull',
-      videoPath,
-      outputPath,
-      segments: p.segments ?? [],
-      matches: p.matches ?? [],
-      sfxPool: p.sfxPool ?? {},
-      maxWords: clampNumber(p.maxWords, 1, 20, 3),
-      silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -40),
-      minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 800),
-      paddingMs: clampNumber(p.paddingMs, 0, 1000, 200),
-      mergeGapMs: clampNumber(p.mergeGapMs, 0, 2000, 300),
-      minKeepMs: clampNumber(p.minKeepMs, 0, 1000, 150),
-      attentionLengthMs: clampNumber(p.attentionLengthMs, 500, 60000, 3000),
-      graphicDisplaySec: clampNumber(p.graphicDisplaySec, 0.5, 30, 2),
-    })
+    return sendToEngine(
+      {
+        command: 'exportFull',
+        videoPath,
+        outputPath,
+        segments: p.segments ?? [],
+        matches: p.matches ?? [],
+        sfxPool: p.sfxPool ?? {},
+        maxWords: clampNumber(p.maxWords, 1, 20, 3),
+        silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -40),
+        minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 800),
+        paddingMs: clampNumber(p.paddingMs, 0, 1000, 200),
+        mergeGapMs: clampNumber(p.mergeGapMs, 0, 2000, 300),
+        minKeepMs: clampNumber(p.minKeepMs, 0, 1000, 150),
+        attentionLengthMs: clampNumber(p.attentionLengthMs, 500, 60000, 3000),
+        graphicDisplaySec: clampNumber(p.graphicDisplaySec, 0.5, 30, 2),
+        graphicWidthPercent: clampNumber(p.graphicWidthPercent, 10, 100, 85),
+      },
+      { timeoutMs: LONG_ENGINE_TIMEOUT_MS },
+    )
   })
 }
