@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import TimelineBar from './TimelineBar'
+import type { KeepSegment } from '../lib/timelineRemap'
+import { sourceTimeToOutput } from '../lib/timelineRemap'
 
 type TimelineSegment = {
   start: number
@@ -49,6 +51,8 @@ type WordTrigger = { start: number; word: string }
 
 type TimelinePreviewProps = {
   timeline: TimelineData
+  keepSegments: KeepSegment[]
+  attentionLengthMs: number
   selectedGraphicId: string | null
   wordTriggers: Record<string, WordTrigger>
   onWordAssign: (payload: { start: number; end: number; word: string }) => void
@@ -99,6 +103,8 @@ function isWordLinked(wStart: number, wText: string, triggers: Record<string, Wo
 
 export default function TimelinePreview({
   timeline,
+  keepSegments,
+  attentionLengthMs,
   selectedGraphicId,
   wordTriggers,
   onWordAssign,
@@ -108,6 +114,7 @@ export default function TimelinePreview({
   const counts = timeline.eventCounts ?? {}
   const totalSilence = silences.reduce((sum, s) => sum + (s.end - s.start), 0)
   const duration = timeline.video?.duration ?? 0
+  const hasRemap = keepSegments.length > 0
 
   return (
     <div className="m-4 space-y-4 overflow-auto rounded-lg border border-zinc-800 bg-zinc-900 p-4">
@@ -147,13 +154,21 @@ export default function TimelinePreview({
                 label: evt.type.toUpperCase(),
                 color: 'text-zinc-400',
               }
+              const outStart = hasRemap ? sourceTimeToOutput(evt.start, keepSegments) : null
               return (
                 <li
                   key={i}
                   className={`flex items-baseline gap-2 rounded px-3 py-1.5 text-xs ${style.bg}`}
                 >
-                  <span className={`font-mono shrink-0 w-14 text-right ${style.color}`}>
-                    {evt.start.toFixed(1)}s
+                  <span
+                    className={`font-mono shrink-0 text-right ${style.color} ${hasRemap ? 'min-w-[7.5rem]' : 'w-14'}`}
+                  >
+                    {evt.start.toFixed(1)}s src
+                    {outStart != null && (
+                      <span className="block text-[10px] text-zinc-500 font-normal">
+                        {outStart.toFixed(1)}s out
+                      </span>
+                    )}
                   </span>
                   <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-bold ${style.color} bg-black/20`}>
                     {style.label}
@@ -248,7 +263,7 @@ export default function TimelinePreview({
       {/* Config */}
       <div className="flex gap-4 text-xs text-zinc-600 pt-2 border-t border-zinc-800">
         <span>Silence: {timeline.silenceThresholdMs}ms</span>
-        <span>Attention: 3000ms</span>
+        <span>Attention: {attentionLengthMs}ms</span>
       </div>
     </div>
   )

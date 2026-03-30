@@ -174,6 +174,20 @@ export function registerIpcHandlers(): void {
     const outputPath = validateOutputPath(p.outputPath)
     if (!outputPath) return ipcError('Invalid or missing output file path.')
 
+    const capPos = p.captionPosition === 'center' ? 'center' : 'bottom'
+    const gpos = [
+      'center',
+      'top',
+      'bottom',
+      'top_right',
+      'top_left',
+      'bottom_right',
+      'bottom_left',
+    ].includes(String(p.graphicPosition))
+      ? String(p.graphicPosition)
+      : 'center'
+    const gmot = p.graphicMotion === 'slide_in' ? 'slide_in' : 'none'
+
     return sendToEngine(
       {
         command: 'exportFull',
@@ -182,6 +196,7 @@ export function registerIpcHandlers(): void {
         segments: p.segments ?? [],
         matches: p.matches ?? [],
         sfxPool: p.sfxPool ?? {},
+        sfxAssignments: Array.isArray(p.sfxAssignments) ? p.sfxAssignments : undefined,
         maxWords: clampNumber(p.maxWords, 1, 20, 3),
         silenceThresholdDb: clampNumber(p.silenceThresholdDb, -60, 0, -40),
         minSilenceDurationMs: clampNumber(p.minSilenceDurationMs, 100, 5000, 800),
@@ -191,6 +206,27 @@ export function registerIpcHandlers(): void {
         attentionLengthMs: clampNumber(p.attentionLengthMs, 500, 60000, 3000),
         graphicDisplaySec: clampNumber(p.graphicDisplaySec, 0.5, 30, 2),
         graphicWidthPercent: clampNumber(p.graphicWidthPercent, 10, 100, 85),
+        captionFontSize: clampNumber(p.captionFontSize, 12, 120, 24),
+        captionFontColor:
+          typeof p.captionFontColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(p.captionFontColor)
+            ? p.captionFontColor.slice(1).toUpperCase()
+            : 'FFFFFF',
+        captionPosition: capPos,
+        captionBold: Boolean(p.captionBold),
+        captionBox: Boolean(p.captionBox),
+        captionBorderWidth: clampNumber(p.captionBorderWidth, 0, 8, 2),
+        captionFadeInSec: clampNumber(p.captionFadeInSec, 0, 2, 0),
+        captionFadeOutSec: clampNumber(p.captionFadeOutSec, 0, 2, 0),
+        graphicPosition: gpos,
+        graphicMotion: gmot,
+        graphicAnimInSec: clampNumber(p.graphicAnimInSec, 0, 3, 0.25),
+        sfxCaptionEveryN: clampNumber(p.sfxCaptionEveryN, 1, 20, 1),
+        sfxGraphicEveryN: clampNumber(p.sfxGraphicEveryN, 1, 20, 1),
+        removeFillerWords: Boolean(p.removeFillerWords),
+        faceZoomEnabled: Boolean(p.faceZoomEnabled),
+        faceZoomIntervalSec: clampNumber(p.faceZoomIntervalSec, 0.5, 30, 3),
+        faceZoomPulseSec: clampNumber(p.faceZoomPulseSec, 0.05, 2, 0.35),
+        faceZoomStrength: clampNumber(p.faceZoomStrength, 0, 0.45, 0.12),
       },
       { timeoutMs: LONG_ENGINE_TIMEOUT_MS },
     )

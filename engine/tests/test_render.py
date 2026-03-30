@@ -9,6 +9,7 @@ import pytest
 from engine.render import (
     chunk_words,
     build_caption_chunks,
+    collect_sfx_plays,
     render_full,
     source_time_to_output,
     remap_interval,
@@ -81,6 +82,21 @@ def test_source_time_to_output_skips_gap() -> None:
 def test_remap_interval_collapses_in_gap() -> None:
     keep = [{"start": 0.0, "end": 2.0}, {"start": 5.0, "end": 8.0}]
     assert remap_interval(2.5, 4.5, keep) is None
+
+
+def test_collect_sfx_caption_every_n(tmp_path) -> None:
+    wav = tmp_path / "x.wav"
+    wav.write_bytes(b"fake")
+    events = [
+        {"type": "sfx", "start": 0.0, "trigger": "caption_entry"},
+        {"type": "sfx", "start": 0.5, "trigger": "caption_entry"},
+        {"type": "sfx", "start": 1.0, "trigger": "caption_entry"},
+        {"type": "sfx", "start": 1.5, "trigger": "caption_entry"},
+    ]
+    assigns = [{"trigger": "caption_entry", "filePath": str(wav), "volume": 1.0}]
+    keep = [{"start": 0.0, "end": 10.0}]
+    plays = collect_sfx_plays(events, {}, assigns, keep, caption_every_n=2, graphic_every_n=1)
+    assert len(plays) == 2
 
 
 @pytest.fixture(scope="module")

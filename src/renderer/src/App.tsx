@@ -4,7 +4,12 @@ import FileCard from './components/FileCard'
 import ProcessButton from './components/ProcessButton'
 import ProgressBar from './components/ProgressBar'
 import ConfigPanel from './components/ConfigPanel'
-import SfxPoolPanel, { buildSfxPool, DEFAULT_SFX_SLOTS, type SfxSlot } from './components/SfxPoolPanel'
+import SfxPoolPanel, {
+  buildSfxAssignments,
+  buildSfxPool,
+  DEFAULT_SFX_SLOTS,
+  type SfxSlot,
+} from './components/SfxPoolPanel'
 import TimelinePreview, { type TimelineData } from './components/TimelinePreview'
 import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
 import ExportVideoButton from './components/ExportVideoButton'
@@ -33,6 +38,24 @@ const DEFAULT_CONFIG: PipelineConfig = {
   maxWords: 3,
   graphicDisplaySec: 2,
   graphicWidthPercent: 85,
+  captionFontSize: 28,
+  captionFontColor: '#FFFFFF',
+  captionPosition: 'bottom',
+  captionBold: false,
+  captionBox: false,
+  captionBorderWidth: 2,
+  captionFadeInSec: 0,
+  captionFadeOutSec: 0,
+  graphicPosition: 'center',
+  graphicMotion: 'none',
+  graphicAnimInSec: 0.25,
+  sfxCaptionEveryN: 1,
+  sfxGraphicEveryN: 1,
+  removeFillerWords: false,
+  faceZoomEnabled: false,
+  faceZoomIntervalSec: 3,
+  faceZoomPulseSec: 0.35,
+  faceZoomStrength: 0.12,
 }
 
 function App(): React.JSX.Element {
@@ -255,10 +278,13 @@ function App(): React.JSX.Element {
                     pipelineResult={pipeline.result}
                     exportMatches={exportMatches}
                     sfxPool={buildSfxPool(sfxSlots)}
+                    sfxAssignments={buildSfxAssignments(sfxSlots)}
                     disabled={isProcessing}
                   />
                   <TimelinePreview
                     timeline={displayTimeline}
+                    keepSegments={pipeline.result.keepSegments ?? []}
+                    attentionLengthMs={config.attentionLengthMs}
                     selectedGraphicId={selectedGraphicId}
                     wordTriggers={wordTriggers}
                     onWordAssign={handleWordAssign}

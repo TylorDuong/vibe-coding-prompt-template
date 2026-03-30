@@ -20,7 +20,8 @@ const PARAMS: ParamDef[] = [
   {
     key: 'silenceThresholdDb',
     label: 'Silence dB',
-    tooltip: 'Audio level (in decibels) below which sound is considered silence. Lower values (e.g. -50) are less aggressive and preserve softer speech. Higher values (e.g. -25) cut more aggressively.',
+    tooltip:
+      'Audio level (in decibels) below which sound is considered silence. Lower values (e.g. -50) are less aggressive and preserve softer speech. Higher values (e.g. -25) cut more aggressively.',
     min: -60,
     max: -10,
     step: 5,
@@ -29,7 +30,8 @@ const PARAMS: ParamDef[] = [
   {
     key: 'minSilenceDurationMs',
     label: 'Min silence',
-    tooltip: 'Minimum duration of a quiet gap before it counts as a "silence" to cut. Higher values only cut longer pauses, preserving natural rhythm. Lower values cut shorter pauses for faster pacing.',
+    tooltip:
+      'Minimum duration of a quiet gap before it counts as a "silence" to cut. Higher values only cut longer pauses, preserving natural rhythm. Lower values cut shorter pauses for faster pacing.',
     min: 200,
     max: 3000,
     step: 100,
@@ -38,7 +40,8 @@ const PARAMS: ParamDef[] = [
   {
     key: 'paddingMs',
     label: 'Padding',
-    tooltip: 'Extra time added to the start and end of each kept segment. Prevents clipping the beginning/end of words. Increase if words sound cut off.',
+    tooltip:
+      'Extra time added to the start and end of each kept segment. Prevents clipping the beginning/end of words. Increase if words sound cut off.',
     min: 0,
     max: 500,
     step: 25,
@@ -47,7 +50,8 @@ const PARAMS: ParamDef[] = [
   {
     key: 'mergeGapMs',
     label: 'Merge gap',
-    tooltip: 'If two speech segments are closer than this gap, they are merged into one continuous block. Prevents choppy rapid cuts between nearby words.',
+    tooltip:
+      'If two speech segments are closer than this gap, they are merged into one continuous block. Prevents choppy rapid cuts between nearby words.',
     min: 0,
     max: 1000,
     step: 50,
@@ -56,7 +60,8 @@ const PARAMS: ParamDef[] = [
   {
     key: 'minKeepMs',
     label: 'Min keep',
-    tooltip: 'Segments shorter than this duration are discarded. Filters out noise blips and partial sounds that aren\'t meaningful speech.',
+    tooltip:
+      "Segments shorter than this duration are discarded. Filters out noise blips and partial sounds that aren't meaningful speech.",
     min: 0,
     max: 500,
     step: 25,
@@ -65,7 +70,8 @@ const PARAMS: ParamDef[] = [
   {
     key: 'maxWords',
     label: 'Max words',
-    tooltip: 'Maximum number of caption words shown on screen at once. Lower values (2-3) create faster-paced TikTok-style captions. Higher values (5-8) show more context per frame.',
+    tooltip:
+      'Maximum number of caption words shown on screen at once. Lower values (2-3) create faster-paced TikTok-style captions. Higher values (5-8) show more context per frame.',
     min: 1,
     max: 12,
     step: 1,
@@ -74,7 +80,8 @@ const PARAMS: ParamDef[] = [
   {
     key: 'attentionLengthMs',
     label: 'Attention length',
-    tooltip: 'Maximum time before a visual or audio stimulus (SFX) is inserted to maintain viewer engagement. Based on short-form content retention research.',
+    tooltip:
+      'Maximum time before a visual or audio stimulus (SFX) is inserted to maintain viewer engagement. Based on short-form content retention research.',
     min: 1000,
     max: 10000,
     step: 500,
@@ -83,7 +90,8 @@ const PARAMS: ParamDef[] = [
   {
     key: 'graphicDisplaySec',
     label: 'Graphic length',
-    tooltip: 'Maximum time each matched graphic stays on screen in the full export. Shorter values keep overlays punchy; longer values hold the image through more of the matched speech.',
+    tooltip:
+      'Maximum time each matched graphic stays on screen in the full export. Shorter values keep overlays punchy; longer values hold the image through more of the matched speech.',
     min: 0.5,
     max: 30,
     step: 0.5,
@@ -92,7 +100,8 @@ const PARAMS: ParamDef[] = [
   {
     key: 'graphicWidthPercent',
     label: 'Graphic width',
-    tooltip: 'Target width of each overlaid graphic as a percentage of the video frame (uniform scale, image aspect ratio preserved, centered). If that width would make the graphic taller than the frame, it shrinks so it still fits vertically.',
+    tooltip:
+      'Target width of each overlaid graphic as a percentage of the video frame (uniform scale, image aspect ratio preserved, centered). If that width would make the graphic taller than the frame, it shrinks so it still fits vertically.',
     min: 10,
     max: 100,
     step: 5,
@@ -100,11 +109,106 @@ const PARAMS: ParamDef[] = [
   },
 ]
 
+const CAPTION_NUM_PARAMS: ParamDef[] = [
+  {
+    key: 'captionFontSize',
+    label: 'Caption size',
+    tooltip: 'Drawtext font size in the exported video.',
+    min: 16,
+    max: 96,
+    step: 2,
+    unit: 'px',
+  },
+  {
+    key: 'captionBorderWidth',
+    label: 'Caption outline',
+    tooltip: 'Outline thickness around caption text (0 = no outline).',
+    min: 0,
+    max: 8,
+    step: 1,
+    unit: '',
+  },
+  {
+    key: 'captionFadeInSec',
+    label: 'Cap. fade in',
+    tooltip: 'Seconds to fade each caption line in (0 = instant).',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    unit: 's',
+  },
+  {
+    key: 'captionFadeOutSec',
+    label: 'Cap. fade out',
+    tooltip: 'Seconds to fade each caption line out before the next.',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    unit: 's',
+  },
+  {
+    key: 'graphicAnimInSec',
+    label: 'Graphic move',
+    tooltip: 'Duration of slide-in motion when graphic motion is enabled.',
+    min: 0,
+    max: 3,
+    step: 0.05,
+    unit: 's',
+  },
+  {
+    key: 'sfxCaptionEveryN',
+    label: 'SFX / caption',
+    tooltip: 'Play caption-triggered SFX on every Nth caption line (1 = every line).',
+    min: 1,
+    max: 10,
+    step: 1,
+    unit: '',
+  },
+  {
+    key: 'sfxGraphicEveryN',
+    label: 'SFX / graphic',
+    tooltip: 'Play graphic-triggered SFX on every Nth graphic (1 = every graphic).',
+    min: 1,
+    max: 10,
+    step: 1,
+    unit: '',
+  },
+  {
+    key: 'faceZoomIntervalSec',
+    label: 'Face zoom int.',
+    tooltip: 'Seconds between face-zoom pulses on the export timeline (when enabled).',
+    min: 0.5,
+    max: 15,
+    step: 0.5,
+    unit: 's',
+  },
+  {
+    key: 'faceZoomPulseSec',
+    label: 'Face zoom dur.',
+    tooltip: 'How long each zoom pulse lasts.',
+    min: 0.05,
+    max: 2,
+    step: 0.05,
+    unit: 's',
+  },
+  {
+    key: 'faceZoomStrength',
+    label: 'Face zoom amt.',
+    tooltip: 'Extra zoom amount (0.12 ≈ 12% crop). Higher = tighter face frame.',
+    min: 0,
+    max: 0.45,
+    step: 0.02,
+    unit: '',
+  },
+]
+
 function Tooltip({ text }: { text: string }): React.JSX.Element {
   return (
-    <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56
+    <div
+      className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56
                     rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-xs text-zinc-300
-                    opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50 shadow-lg">
+                    opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50 shadow-lg"
+    >
       {text}
       <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-800" />
     </div>
@@ -112,56 +216,207 @@ function Tooltip({ text }: { text: string }): React.JSX.Element {
 }
 
 export default function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps): React.JSX.Element {
-  const update = (key: keyof PipelineConfig, value: number) => {
+  const update = (key: keyof PipelineConfig, value: number | string | boolean) => {
     onChange({ ...config, [key]: value })
   }
 
   return (
-    <div className="mx-4 mt-3 rounded-lg border border-zinc-800 bg-zinc-900 p-3">
-      <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-3">
-        Processing Parameters
-      </h3>
-      <div className="grid grid-cols-3 gap-x-4 gap-y-3">
-        {PARAMS.map((param) => (
-          <div key={param.key} className="relative group">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-zinc-400 cursor-help flex items-center gap-1">
-                {param.label}
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="text-zinc-600"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                  <line x1="12" y1="17" x2="12.01" y2="17" />
-                </svg>
-              </span>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  min={param.min}
-                  max={param.max}
-                  step={param.step}
-                  value={config[param.key]}
-                  onChange={(e) => update(param.key, Number(e.target.value))}
-                  disabled={disabled}
-                  className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+    <div className="mx-4 mt-3 space-y-3">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+        <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-3">
+          Processing Parameters
+        </h3>
+        <div className="grid grid-cols-3 gap-x-4 gap-y-3">
+          {PARAMS.map((param) => (
+            <div key={param.key} className="relative group">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-zinc-400 cursor-help flex items-center gap-1">
+                  {param.label}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="text-zinc-600"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                </span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={param.min}
+                    max={param.max}
+                    step={param.step}
+                    value={config[param.key] as number}
+                    onChange={(e) => update(param.key, Number(e.target.value))}
+                    disabled={disabled}
+                    className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                              focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
-                />
-                <span className="text-[10px] text-zinc-600 shrink-0 w-6">{param.unit}</span>
-              </div>
-            </label>
-            <Tooltip text={param.tooltip} />
-          </div>
-        ))}
+                  />
+                  <span className="text-[10px] text-zinc-600 shrink-0 w-6">{param.unit}</span>
+                </div>
+              </label>
+              <Tooltip text={param.tooltip} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+        <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-3">
+          Caption and export
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Caption color
+            <input
+              type="color"
+              value={config.captionFontColor}
+              onChange={(e) => update('captionFontColor', e.target.value)}
+              disabled={disabled}
+              className="h-8 w-full rounded border border-zinc-700 bg-zinc-800 disabled:opacity-50"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Caption position
+            <select
+              value={config.captionPosition}
+              onChange={(e) =>
+                update('captionPosition', e.target.value as PipelineConfig['captionPosition'])
+              }
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            >
+              <option value="bottom">Bottom</option>
+              <option value="center">Center</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Graphic position
+            <select
+              value={config.graphicPosition}
+              onChange={(e) =>
+                update('graphicPosition', e.target.value as PipelineConfig['graphicPosition'])
+              }
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            >
+              <option value="center">Center</option>
+              <option value="top">Top</option>
+              <option value="bottom">Bottom</option>
+              <option value="top_right">Top right</option>
+              <option value="top_left">Top left</option>
+              <option value="bottom_right">Bottom right</option>
+              <option value="bottom_left">Bottom left</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Graphic motion
+            <select
+              value={config.graphicMotion}
+              onChange={(e) =>
+                update('graphicMotion', e.target.value as PipelineConfig['graphicMotion'])
+              }
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            >
+              <option value="none">None</option>
+              <option value="slide_in">Slide in</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="flex flex-wrap gap-4 mb-3 text-xs">
+          <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.captionBold}
+              onChange={(e) => update('captionBold', e.target.checked)}
+              disabled={disabled}
+              className="rounded border-zinc-600"
+            />
+            Bold captions
+          </label>
+          <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.captionBox}
+              onChange={(e) => update('captionBox', e.target.checked)}
+              disabled={disabled}
+              className="rounded border-zinc-600"
+            />
+            Caption background
+          </label>
+          <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.removeFillerWords}
+              onChange={(e) => update('removeFillerWords', e.target.checked)}
+              disabled={disabled}
+              className="rounded border-zinc-600"
+            />
+            Strip filler words (captions only)
+          </label>
+          <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.faceZoomEnabled}
+              onChange={(e) => update('faceZoomEnabled', e.target.checked)}
+              disabled={disabled}
+              className="rounded border-zinc-600"
+            />
+            Face zoom pulses
+          </label>
+        </div>
+
+        <div className="grid grid-cols-3 gap-x-4 gap-y-3">
+          {CAPTION_NUM_PARAMS.map((param) => (
+            <div key={param.key} className="relative group">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-zinc-400 cursor-help flex items-center gap-1">
+                  {param.label}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="text-zinc-600"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                </span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={param.min}
+                    max={param.max}
+                    step={param.step}
+                    value={config[param.key] as number}
+                    onChange={(e) => update(param.key, Number(e.target.value))}
+                    disabled={disabled}
+                    className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+                             focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
+                  />
+                  <span className="text-[10px] text-zinc-600 shrink-0 w-6">{param.unit}</span>
+                </div>
+              </label>
+              <Tooltip text={param.tooltip} />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

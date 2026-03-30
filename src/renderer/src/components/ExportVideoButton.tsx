@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import type { PipelineConfig, PipelineResult } from '../hooks/useProcessPipeline'
-import type { SfxPool } from './SfxPoolPanel'
+import type { SfxExportAssignment, SfxPool } from './SfxPoolPanel'
 
 type ExportVideoButtonProps = {
   videoPath: string
@@ -9,6 +9,7 @@ type ExportVideoButtonProps = {
   /** Final graphic matches (manual word triggers merged in the UI) */
   exportMatches: Record<string, unknown>[]
   sfxPool: SfxPool
+  sfxAssignments: SfxExportAssignment[]
   disabled: boolean
 }
 
@@ -37,6 +38,7 @@ export default function ExportVideoButton({
   pipelineResult,
   exportMatches,
   sfxPool,
+  sfxAssignments,
   disabled,
 }: ExportVideoButtonProps): React.JSX.Element {
   const [isExporting, setIsExporting] = useState(false)
@@ -62,6 +64,7 @@ export default function ExportVideoButton({
         segments: pipelineResult.segments,
         matches: exportMatches,
         sfxPool,
+        sfxAssignments,
         maxWords: config.maxWords,
         silenceThresholdDb: config.silenceThresholdDb,
         minSilenceDurationMs: config.minSilenceDurationMs,
@@ -71,6 +74,24 @@ export default function ExportVideoButton({
         attentionLengthMs: config.attentionLengthMs,
         graphicDisplaySec: config.graphicDisplaySec,
         graphicWidthPercent: config.graphicWidthPercent,
+        captionFontSize: config.captionFontSize,
+        captionFontColor: config.captionFontColor,
+        captionPosition: config.captionPosition,
+        captionBold: config.captionBold,
+        captionBox: config.captionBox,
+        captionBorderWidth: config.captionBorderWidth,
+        captionFadeInSec: config.captionFadeInSec,
+        captionFadeOutSec: config.captionFadeOutSec,
+        graphicPosition: config.graphicPosition,
+        graphicMotion: config.graphicMotion,
+        graphicAnimInSec: config.graphicAnimInSec,
+        sfxCaptionEveryN: config.sfxCaptionEveryN,
+        sfxGraphicEveryN: config.sfxGraphicEveryN,
+        removeFillerWords: config.removeFillerWords,
+        faceZoomEnabled: config.faceZoomEnabled,
+        faceZoomIntervalSec: config.faceZoomIntervalSec,
+        faceZoomPulseSec: config.faceZoomPulseSec,
+        faceZoomStrength: config.faceZoomStrength,
       })) as ExportResult
 
       if (exportResult.ok && exportResult.data) {
@@ -83,7 +104,7 @@ export default function ExportVideoButton({
     } finally {
       setIsExporting(false)
     }
-  }, [videoPath, config, pipelineResult, exportMatches, sfxPool])
+  }, [videoPath, config, pipelineResult, exportMatches, sfxPool, sfxAssignments])
 
   return (
     <div className="mx-4 mt-3 space-y-2">

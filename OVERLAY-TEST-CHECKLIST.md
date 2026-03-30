@@ -57,21 +57,90 @@
 - [x] maxWords=5 shows longer phrases *(all max-words variations exercised)*
 
 ## Test 6: Edge Cases
-- [ ] Export with no transcript segments (very short video)
-- [ ] Export with graphics but no SFX
-- [ ] Export with SFX but no graphics
-- [ ] Export with all SFX triggers set to "Disabled"
+- [X] Export with no transcript segments (very short video)
+- [X] Export with graphics but no SFX
+- [X] Export with SFX but no graphics
+- [X] Export with all SFX triggers set to "Disabled"
 
 ---
 
 ## Future Enhancements (Post-Testing)
-After the above tests pass, the next iteration should add:
-- [ ] Timeline: show **source** and **edited** times for events (map graphics to final timeline by subtracting removed silence durations)
-- [ ] Caption animations (fade in/out, pop, slide up)
-- [ ] Graphic animations (slide in from side, scale up, fade)
-- [ ] Caption styling options (font, size, color, position, background)
-- [ ] Graphic positioning options (top-right, center, custom x/y)
-- [ ] SFX volume control per slot
-- [ ] Multiple SFX per trigger type
-- [ ] Timeline scrubber for in-app preview before export
-- [ ] Progress reporting during full export (percentage)
+Implementation roadmap (ordered by dependency). Effort: **S** small, **M** medium, **L** large.
+
+| Phase | Item | Effort | Notes |
+|-------|------|--------|--------|
+| A | Timeline: source + edited times | S | Uses `keepSegments` from engine; UI shows both |
+| A | Caption styling (size, color, position, bold, box) | M | FFmpeg `drawtext`; bold via font file (`SPLITTY_FFMPEG_FONT` / system bold TTF) |
+| A | Graphic position presets | S | Overlay `x`/`y` presets (center, corners, top/bottom) |
+| B | Caption intro/outro (fade) | M | `drawtext` `alpha` expression |
+| B | Graphic intro motion (e.g. slide-in) | M | Animated overlay `x`/`y`; full graphic fade is harder in single-pass FFmpeg |
+| C | SFX frequency (every Nth caption/graphic) | S | Throttle in `collect_sfx_plays` |
+| C | SFX volume per slot | M | `volume` filter per branch before `amix` |
+| C | Attention length vs SFX density | S | Existing **Attention length** ms — higher ⇒ fewer attention-fill cues |
+| D | Face-driven zoom pulses (local OpenCV) | L | Optional; gated flag; samples video for face center |
+| E | Filler word stripping (text only) | S | Blocklist on word list before caption chunking; does not cut audio |
+| — | Multiple SFX per same trigger (round-robin) | M | `sfxAssignments` array |
+| — | Timeline scrubber + export % progress | L | Not started |
+
+---
+
+### Enhancement A1 — Source vs edited timeline times
+**Goal:** Operators see when an event lands on the **source** file clock and on the **exported** (silence-cut) timeline.
+
+**Implementation:** Engine `process` returns `keepSegments`; renderer maps `sourceTimeToOutput(start)`.
+
+**Manual verification:**
+- [ ] Process a clip with removable silence; open Timeline Events.
+- [ ] Each row shows **src** and **out** times; **out** matches export roughly for captions/graphics.
+
+### Enhancement A2 — Caption styling
+**Goal:** Large centered captions, custom color, optional background box (TikTok-style).
+
+**Implementation:** Config panel + `exportFull` fields; `engine/render.py` `drawtext`.
+
+**Manual verification:**
+- [ ] Set position **Center**, size **48**, color **#FFE066**, export — text matches.
+- [ ] Toggle **Caption background** — readability improves on busy footage.
+- [ ] **Bold** uses a bold-capable font path (Windows: Segoe UI Bold when available).
+
+### Enhancement A3 — Graphic position
+**Goal:** Place graphics at center (default) or corners / top / bottom.
+
+**Manual verification:**
+- [ ] Set **Top right**, export — graphic sits in corner without clipping oddly at common resolutions.
+
+### Enhancement B — Caption / graphic motion
+**Goal:** Short fade on caption lines; slide-in for graphics when enabled.
+
+**Manual verification:**
+- [ ] Set caption fade in/out **0.15** s — no pop-in; timing still aligned with speech.
+- [ ] Graphic **Slide in** — motion completes within the graphic window; no tearing.
+
+### Enhancement C — SFX density and volume
+**Goal:** Fewer (or more) caption/graphic SFX via **every N**; per-slot volume **0–200%**.
+
+**Manual verification:**
+- [ ] **Caption SFX every 2** — roughly half as many pop cues vs every 1.
+- [ ] Lower one slot’s volume — that cue is quieter in the mix.
+
+### Enhancement D — Face zoom (optional)
+**Goal:** Periodic zoom toward detected face on **output** timeline (pulses), strength and interval configurable.
+
+**Implementation:** `opencv-python-headless` + Haar cascade; optional; if OpenCV missing or no face, falls back to center crop.
+
+**Manual verification:**
+- [ ] Enable face zoom, export talking-head clip — subtle zoom pulses.
+- [ ] Disable — identical to previous behavior.
+- [ ] Profile / no face — no crash; neutral crop.
+
+### Enhancement E — Filler words
+**Goal:** Remove common fillers from **caption text** only (transcript words dropped before chunking).
+
+**Manual verification:**
+- [ ] Enable **Remove filler words**, export — “um” / “uh” absent from captions when Whisper separated them.
+- [ ] Audio unchanged (filler may still be audible).
+
+### Backlog (not implemented here)
+- [ ] Timeline scrubber in-app preview
+- [ ] Export progress percentage
+- [ ] Full graphic fade synced to main timeline (complex FFmpeg graph)
