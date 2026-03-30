@@ -14,6 +14,7 @@ import TimelinePreview, { type TimelineData } from './components/TimelinePreview
 import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
 import ExportVideoButton from './components/ExportVideoButton'
 import { useProcessPipeline, type PipelineConfig } from './hooks/useProcessPipeline'
+import { DEFAULT_PIPELINE_CONFIG } from './lib/pipelineConfigPreset'
 import {
   buildExportMatches,
   mergeTimelineWithMatches,
@@ -28,41 +29,15 @@ type LoadedFile = {
   meta: FileMetadata
 }
 
-const DEFAULT_CONFIG: PipelineConfig = {
-  silenceThresholdDb: -40,
-  minSilenceDurationMs: 800,
-  paddingMs: 200,
-  mergeGapMs: 300,
-  minKeepMs: 150,
-  attentionLengthMs: 3000,
-  maxWords: 3,
-  graphicDisplaySec: 2,
-  graphicWidthPercent: 85,
-  captionFontSize: 28,
-  captionFontColor: '#FFFFFF',
-  captionPosition: 'bottom',
-  captionBold: false,
-  captionBox: false,
-  captionBorderWidth: 2,
-  captionFadeInSec: 0,
-  captionFadeOutSec: 0,
-  graphicPosition: 'center',
-  graphicMotion: 'none',
-  graphicAnimInSec: 0.25,
-  sfxCaptionEveryN: 1,
-  sfxGraphicEveryN: 1,
-  removeFillerWords: false,
-  faceZoomEnabled: false,
-  faceZoomIntervalSec: 3,
-  faceZoomPulseSec: 0.35,
-  faceZoomStrength: 0.12,
-}
+const DEFAULT_CONFIG: PipelineConfig = DEFAULT_PIPELINE_CONFIG
 
 function App(): React.JSX.Element {
   const [engineStatus, setEngineStatus] = useState<EngineStatus>('checking')
   const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null)
   const [graphics, setGraphics] = useState<GraphicItem[]>([])
   const [config, setConfig] = useState<PipelineConfig>(DEFAULT_CONFIG)
+  const [presetNotice, setPresetNotice] = useState<string | null>(null)
+  const [presetError, setPresetError] = useState<string | null>(null)
   const [sfxSlots, setSfxSlots] = useState<SfxSlot[]>(DEFAULT_SFX_SLOTS)
   const [selectedGraphicId, setSelectedGraphicId] = useState<string | null>(null)
   const [wordTriggers, setWordTriggers] = useState<Record<string, WordTrigger>>({})
@@ -127,6 +102,17 @@ function App(): React.JSX.Element {
   useEffect(() => {
     checkEngine()
   }, [checkEngine])
+
+  useEffect(() => {
+    if (!presetNotice && !presetError) {
+      return
+    }
+    const t = window.setTimeout(() => {
+      setPresetNotice(null)
+      setPresetError(null)
+    }, 6000)
+    return () => window.clearTimeout(t)
+  }, [presetNotice, presetError])
 
   const handleFileAccepted = useCallback((filePath: string, meta: FileMetadata) => {
     setLoadedFile({ filePath, meta })
@@ -235,10 +221,26 @@ function App(): React.JSX.Element {
                 onClear={handleClear}
               />
 
+              {(presetNotice ?? presetError) && (
+                <div className="mx-4 mt-2 rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2">
+                  {presetError && <p className="text-xs text-red-400">{presetError}</p>}
+                  {presetNotice && <p className="text-xs text-emerald-400">{presetNotice}</p>}
+                </div>
+              )}
+
               <ConfigPanel
                 config={config}
                 onChange={setConfig}
+                defaultConfig={DEFAULT_CONFIG}
                 disabled={isProcessing}
+                onPresetSuccess={(msg) => {
+                  setPresetError(null)
+                  setPresetNotice(msg)
+                }}
+                onPresetError={(msg) => {
+                  setPresetNotice(null)
+                  setPresetError(msg)
+                }}
               />
 
               <SfxPoolPanel

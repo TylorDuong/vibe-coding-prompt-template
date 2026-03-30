@@ -1,9 +1,24 @@
 import type { PipelineConfig } from '../hooks/useProcessPipeline'
+import { parsePipelinePresetJson, serializePipelinePreset } from '../lib/pipelineConfigPreset'
+
+type OpenPresetResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string; content: string }
+  | { canceled: false; error: string }
+
+type SavePresetResult =
+  | { canceled: true }
+  | { canceled: false; filePath: string }
+  | { canceled: false; error: string }
 
 type ConfigPanelProps = {
   config: PipelineConfig
   onChange: (config: PipelineConfig) => void
+  /** Defaults used when merging imported JSON (missing keys). */
+  defaultConfig: PipelineConfig
   disabled: boolean
+  onPresetSuccess?: (message: string) => void
+  onPresetError?: (message: string) => void
 }
 
 type ParamDef = {
@@ -215,14 +230,102 @@ function Tooltip({ text }: { text: string }): React.JSX.Element {
   )
 }
 
-export default function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps): React.JSX.Element {
+export default function ConfigPanel({
+  config,
+  onChange,
+  defaultConfig,
+  disabled,
+  onPresetSuccess,
+  onPresetError,
+}: ConfigPanelProps): React.JSX.Element {
   const update = (key: keyof PipelineConfig, value: number | string | boolean) => {
     onChange({ ...config, [key]: value })
+  }
+
+  const handleImportPreset = async (): Promise<void> => {
+    try {
+      const raw = (await window.electron.invoke(
+        'dialog:openConfigPreset',
+      )) as OpenPresetResult
+      if (raw.canceled) {
+        return
+      }
+      if ('error' in raw && raw.error) {
+        onPresetError?.(raw.error)
+        return
+      }
+      if (!('content' in raw) || typeof raw.content !== 'string') {
+        onPresetError?.('Could not read preset file.')
+        return
+      }
+      const parsed = parsePipelinePresetJson(raw.content, defaultConfig)
+      if (!parsed.ok) {
+        onPresetError?.(parsed.error)
+        return
+      }
+      onChange(parsed.config)
+      onPresetSuccess?.('Imported settings from JSON.')
+    } catch (err) {
+      onPresetError?.(err instanceof Error ? err.message : 'Import failed.')
+    }
+  }
+
+  const handleExportPreset = async (): Promise<void> => {
+    try {
+      const body = serializePipelinePreset(config, 'splitty-ai v0.2.0')
+      const raw = (await window.electron.invoke('dialog:saveConfigPreset', {
+        content: body,
+      })) as SavePresetResult
+      if (raw.canceled) {
+        return
+      }
+      if ('error' in raw && raw.error) {
+        onPresetError?.(raw.error)
+        return
+      }
+      if ('filePath' in raw) {
+        onPresetSuccess?.(`Saved settings to ${raw.filePath}`)
+      }
+    } catch (err) {
+      onPresetError?.(err instanceof Error ? err.message : 'Export failed.')
+    }
   }
 
   return (
     <div className="mx-4 mt-3 space-y-3">
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+        <div className="flex flex-wrap items-center gap-2 mb-3 pb-3 border-b border-zinc-800">
+          <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+            Settings preset
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleImportPreset()}
+            disabled={disabled}
+            className="rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700
+                       disabled:opacity-40 disabled:pointer-events-none"
+          >
+            Import JSON…
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExportPreset()}
+            disabled={disabled}
+            className="rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700
+                       disabled:opacity-40 disabled:pointer-events-none"
+          >
+            Export JSON…
+          </button>
+        </div>
+        <p className="text-[10px] text-zinc-600 leading-relaxed mb-3">
+          Preset files use <span className="text-zinc-500">splittyPresetVersion: 1</span> and a{' '}
+          <span className="text-zinc-500">pipelineConfig</span> object. When you add or rename any
+          processing or export field, update{' '}
+          <span className="text-zinc-500 font-mono">src/renderer/src/lib/pipelineConfigPreset.ts</span>,{' '}
+          <span className="text-zinc-500 font-mono">engine/main.py</span> (exportFull),{' '}
+          <span className="text-zinc-500 font-mono">src/main/ipcHandlers.ts</span>, and the maintenance
+          section in <span className="text-zinc-500 font-mono">OVERLAY-TEST-CHECKLIST.md</span>.
+        </p>
         <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-3">
           Processing Parameters
         </h3>

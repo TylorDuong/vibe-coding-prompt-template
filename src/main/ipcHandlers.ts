@@ -1,6 +1,6 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import { sendToEngine, startPythonEngine, isEngineRunning, LONG_ENGINE_TIMEOUT_MS } from './pythonBridge'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { resolve, isAbsolute } from 'path'
 
 function validateFilePath(raw: unknown): string | null {
@@ -85,6 +85,47 @@ export function registerIpcHandlers(): void {
       return { canceled: true }
     }
     return { canceled: false, filePath: result.filePath }
+  })
+
+  ipcMain.handle('dialog:openConfigPreset', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Import Splitty settings (JSON)',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true as const }
+    }
+    const filePath = result.filePaths[0]
+    try {
+      const content = readFileSync(filePath, 'utf-8')
+      return { canceled: false as const, filePath, content }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { canceled: false as const, error: message }
+    }
+  })
+
+  ipcMain.handle('dialog:saveConfigPreset', async (_event, payload: unknown) => {
+    const p = payload as { content?: unknown }
+    const content = typeof p.content === 'string' ? p.content : ''
+    const win = BrowserWindow.getFocusedWindow()
+    const result = await dialog.showSaveDialog(win!, {
+      title: 'Export Splitty settings (JSON)',
+      defaultPath: 'splitty-settings.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    })
+    if (result.canceled || !result.filePath) {
+      return { canceled: true as const }
+    }
+    try {
+      writeFileSync(result.filePath, content, 'utf-8')
+      return { canceled: false as const, filePath: result.filePath }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { canceled: false as const, error: message }
+    }
   })
 
   ipcMain.handle('engine:health', async () => {
