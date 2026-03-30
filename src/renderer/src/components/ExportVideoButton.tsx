@@ -6,6 +6,8 @@ type ExportVideoButtonProps = {
   videoPath: string
   config: PipelineConfig
   pipelineResult: PipelineResult
+  /** Final graphic matches (manual word triggers merged in the UI) */
+  exportMatches: Record<string, unknown>[]
   sfxPool: SfxPool
   disabled: boolean
 }
@@ -33,6 +35,7 @@ export default function ExportVideoButton({
   videoPath,
   config,
   pipelineResult,
+  exportMatches,
   sfxPool,
   disabled,
 }: ExportVideoButtonProps): React.JSX.Element {
@@ -57,7 +60,7 @@ export default function ExportVideoButton({
         videoPath,
         outputPath: dialogResult.filePath,
         segments: pipelineResult.segments,
-        matches: pipelineResult.matches,
+        matches: exportMatches,
         sfxPool,
         maxWords: config.maxWords,
         silenceThresholdDb: config.silenceThresholdDb,
@@ -80,7 +83,7 @@ export default function ExportVideoButton({
     } finally {
       setIsExporting(false)
     }
-  }, [videoPath, config, pipelineResult, sfxPool])
+  }, [videoPath, config, pipelineResult, exportMatches, sfxPool])
 
   return (
     <div className="mx-4 mt-3 space-y-2">

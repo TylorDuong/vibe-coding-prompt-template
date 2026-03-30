@@ -1,3 +1,7 @@
+# System dependency (not installed by pip): FFmpeg and ffprobe on PATH.
+#   Windows: winget install Gyan.FFmpeg — restart terminal/app so PATH updates.
+# Optional env for caption export: SPLITTY_FFMPEG_FONT=absolute\path\to\font.ttf
 ffmpeg-python
 faster-whisper
 sentence-transformers
+Pillow>=10.0.0

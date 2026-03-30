@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import UploadZone, { type FileMetadata } from './components/UploadZone'
 import FileCard from './components/FileCard'
 import ProcessButton from './components/ProcessButton'
@@ -9,6 +9,12 @@ import TimelinePreview, { type TimelineData } from './components/TimelinePreview
 import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
 import ExportVideoButton from './components/ExportVideoButton'
 import { useProcessPipeline, type PipelineConfig } from './hooks/useProcessPipeline'
+import {
+  buildExportMatches,
+  mergeTimelineWithMatches,
+  type WordTrigger,
+  type TimelineDataLike,
+} from './lib/graphicPlacements'
 
 type EngineStatus = 'checking' | 'connected' | 'error'
 
@@ -35,7 +41,43 @@ function App(): React.JSX.Element {
   const [graphics, setGraphics] = useState<GraphicItem[]>([])
   const [config, setConfig] = useState<PipelineConfig>(DEFAULT_CONFIG)
   const [sfxSlots, setSfxSlots] = useState<SfxSlot[]>(DEFAULT_SFX_SLOTS)
+  const [selectedGraphicId, setSelectedGraphicId] = useState<string | null>(null)
+  const [wordTriggers, setWordTriggers] = useState<Record<string, WordTrigger>>({})
   const pipeline = useProcessPipeline()
+
+  const exportMatches = useMemo(() => {
+    if (!pipeline.result) return []
+    return buildExportMatches(
+      graphics,
+      pipeline.result.matches,
+      wordTriggers,
+      config.graphicDisplaySec,
+    )
+  }, [pipeline.result, graphics, wordTriggers, config.graphicDisplaySec])
+
+  const displayTimeline = useMemo((): TimelineData | null => {
+    if (!pipeline.result) return null
+    const base = pipeline.result as unknown as TimelineData
+    const t = mergeTimelineWithMatches(
+      {
+        video: base.video,
+        segments: base.segments,
+        matches: base.matches,
+        silences: base.silences,
+        silenceThresholdMs: base.silenceThresholdMs,
+        events: base.events,
+        eventCounts: base.eventCounts,
+      } satisfies TimelineDataLike,
+      exportMatches,
+      config.attentionLengthMs,
+    )
+    return {
+      ...base,
+      matches: t.matches as TimelineData['matches'],
+      events: t.events as TimelineData['events'],
+      eventCounts: t.eventCounts,
+    }
+  }, [pipeline.result, exportMatches, config.attentionLengthMs])
 
   const checkEngine = useCallback(() => {
     setEngineStatus('checking')
@@ -65,11 +107,15 @@ function App(): React.JSX.Element {
 
   const handleFileAccepted = useCallback((filePath: string, meta: FileMetadata) => {
     setLoadedFile({ filePath, meta })
+    setWordTriggers({})
+    setSelectedGraphicId(null)
     pipeline.reset()
   }, [pipeline])
 
   const handleClear = useCallback(() => {
     setLoadedFile(null)
+    setWordTriggers({})
+    setSelectedGraphicId(null)
     pipeline.reset()
   }, [pipeline])
 
@@ -79,6 +125,12 @@ function App(): React.JSX.Element {
 
   const handleRemoveGraphic = useCallback((id: string) => {
     setGraphics((prev) => prev.filter((g) => g.id !== id))
+    setWordTriggers((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    setSelectedGraphicId((cur) => (cur === id ? null : cur))
   }, [])
 
   const handleTagChange = useCallback((id: string, tag: string) => {
@@ -93,8 +145,33 @@ function App(): React.JSX.Element {
     )
   }, [])
 
+  const handleClearWordPlacement = useCallback((id: string) => {
+    setWordTriggers((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+  }, [])
+
+  const handleWordAssign = useCallback(
+    (payload: { start: number; end: number; word: string }) => {
+      if (!selectedGraphicId) return
+      setWordTriggers((prev) => ({
+        ...prev,
+        [selectedGraphicId]: {
+          start: payload.start,
+          end: payload.end,
+          word: payload.word,
+        },
+      }))
+    },
+    [selectedGraphicId],
+  )
+
   const handleProcess = useCallback(async () => {
     if (!loadedFile) return
+    setWordTriggers({})
+    setSelectedGraphicId(null)
     pipeline.run(loadedFile.filePath, graphics, config)
   }, [loadedFile, graphics, config, pipeline])
 
@@ -170,16 +247,22 @@ function App(): React.JSX.Element {
                 </div>
               )}
 
-              {pipeline.result && (
+              {pipeline.result && displayTimeline && (
                 <>
                   <ExportVideoButton
                     videoPath={loadedFile.filePath}
                     config={config}
                     pipelineResult={pipeline.result}
+                    exportMatches={exportMatches}
                     sfxPool={buildSfxPool(sfxSlots)}
                     disabled={isProcessing}
                   />
-                  <TimelinePreview timeline={pipeline.result as unknown as TimelineData} />
+                  <TimelinePreview
+                    timeline={displayTimeline}
+                    selectedGraphicId={selectedGraphicId}
+                    wordTriggers={wordTriggers}
+                    onWordAssign={handleWordAssign}
+                  />
                 </>
               )}
             </>
@@ -194,6 +277,10 @@ function App(): React.JSX.Element {
           onAdd={handleAddGraphic}
           onRemove={handleRemoveGraphic}
           onTagChange={handleTagChange}
+          selectedId={selectedGraphicId}
+          onSelect={setSelectedGraphicId}
+          wordTriggers={wordTriggers}
+          onClearPlacement={handleClearWordPlacement}
         />
       </main>
 

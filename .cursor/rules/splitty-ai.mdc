@@ -21,6 +21,9 @@
 - `npx tsc --noEmit`
 - `pytest`
 
+## Engine / export notes
+- **Graphic overlays** (`engine/render.py`): **Pillow** (EXIF transpose) + **ffprobe** for frame size; **`_overlay_dims_uniform`** computes integer `w×h` in Python, then **`scale2ref=w=…:h=…:force_original_aspect_ratio=disable`** (avoids FFmpeg `iw/ih` expr bugs on some square stills). Temp EXIF-normalized PNGs before FFmpeg; **`setsar=1`** before/after scale.
+
 ## Anti-Patterns
 - No deleting files without explicit confirmation.
 - No hidden schema/infrastructure changes.

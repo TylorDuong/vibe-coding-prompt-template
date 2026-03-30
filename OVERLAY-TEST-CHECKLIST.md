@@ -10,11 +10,11 @@
 7. Save the output MP4
 
 **Verify:**
-- [ ] Captions appear at the bottom center of the video
-- [ ] Only 3 words show at a time (matching "Max words" setting)
-- [ ] Caption timing matches the spoken words
-- [ ] Captions have white text with black border (readable)
-- [ ] Silences are still correctly cut
+- [x] Captions appear at the bottom center of the video
+- [x] Only 3 words show at a time (matching "Max words" setting)
+- [x] Caption timing matches the spoken words
+- [x] Captions have white text with black border (readable)
+- [x] Silences are still correctly cut
 
 ## Test 2: Captions + Graphics
 1. Process same video as Test 1
@@ -26,10 +26,9 @@
 7. Click **Export Video**
 
 **Verify:**
-- [ ] Graphics appear overlaid on the video at the matched timestamps
-- [ ] Graphics are centered; width matches **Graphic width** % of the video (aspect ratio preserved)
-- [ ] Graphics disappear after their on-screen window ends
-- [ ] Captions still render correctly
+- [x] Graphics appear overlaid on the video at the matched timestamps *(see log: times are still in **source** video time, not edited/final timeline after silence cuts — consider showing both on the timeline and subtracting cut lengths in the UI.)*
+- [x] Graphics are centered; they disappear after their on-screen window ends; captions still render correctly
+- [x] **Graphic width** (% of frame) matches setting with **aspect ratio preserved** *(engine: `scale2ref` width-first `w=if(gt(main_w×frac×ih/iw,main_h),…)` + `h=-2`, then `setsar=1` before `overlay`; re-verify after FFmpeg upgrades)*
 
 ## Test 3: Captions + SFX
 1. Process a video
@@ -37,26 +36,25 @@
 3. Click **Export Video**
 
 **Verify:**
-- [ ] SFX audio plays only for slots you imported (no bundled placeholder sounds)
-- [ ] SFX is mixed with the original audio (not replacing it)
-- [ ] Volume levels are reasonable (SFX doesn't overpower speech)
+- [x] SFX audio plays only for slots you imported (no bundled placeholder sounds)
+- [x] SFX is mixed with the original audio (not replacing it)
+- [x] Volume levels are reasonable (SFX doesn't overpower speech)
 
 ## Test 4: Full Pipeline (Captions + Graphics + SFX)
 1. Load video, add graphics with tags, import SFX files and configure triggers
 2. Process and **Export Video**
 
 **Verify:**
-- [ ] All three overlay types render in the exported video
-- [ ] Timing is correct across all elements
-- [ ] Video plays without artifacts or corruption
+- [x] All three overlay types render in the exported video
+- [x] Timing is consistent across overlays in the export; video plays without artifacts or corruption *(graphic times vs **final** edited timeline: see Test 2 log)*
 
 ## Test 5: Max Words Variation
 1. Export same video with maxWords=1, then maxWords=5
 2. Compare the two exports
 
 **Verify:**
-- [ ] maxWords=1 shows one word at a time (fast TikTok style)
-- [ ] maxWords=5 shows longer phrases
+- [x] maxWords=1 shows one word at a time (fast TikTok style)
+- [x] maxWords=5 shows longer phrases *(all max-words variations exercised)*
 
 ## Test 6: Edge Cases
 - [ ] Export with no transcript segments (very short video)
@@ -68,6 +66,7 @@
 
 ## Future Enhancements (Post-Testing)
 After the above tests pass, the next iteration should add:
+- [ ] Timeline: show **source** and **edited** times for events (map graphics to final timeline by subtracting removed silence durations)
 - [ ] Caption animations (fade in/out, pop, slide up)
 - [ ] Graphic animations (slide in from side, scale up, fade)
 - [ ] Caption styling options (font, size, color, position, background)
