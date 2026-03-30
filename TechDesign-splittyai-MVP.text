@@ -1,0 +1,55 @@
+# Technical Design Document: Splitty AI MVP
+
+## Overview
+
+This document explains how we'll build Splitty AI, utilizing a local-first architecture that leverages your NVIDIA GPU for rapid, free video processing and AI inference.
+
+## Recommended Approach
+
+### Best Path for You: Electron + React + Python (Local Full-Code)
+
+Based on your strong frontend and scripting skills, combined with the 1-week timeline, here's the optimal strategy:
+
+**Primary Approach: Local App with AI Assistance (Cursor/Copilot)**
+- **Why this works:** You already know React, TypeScript, and Python. Electron allows you to build the UI with React, while a local Python process handles the heavy AI/FFmpeg lifting using your gaming laptop's GPU. 
+- **Time to MVP:** 1 week (approx. 20 focused hours)
+- **Cost:** $0 
+- **Hardware Advantage:** Full access to CUDA for hardware-accelerated transcription and semantic matching.
+
+### Tech Stack
+
+#### Frontend (The UI)
+- **Framework:** Electron + React + TypeScript + Tailwind CSS
+  - *Why:* Industry standard for desktop apps, utilizes your existing web dev skills.
+  - *Learning time:* Minimal, just learning Electron's IPC (Inter-Process Communication).
+
+#### Backend (The Engine)
+- **Service:** Local Python Environment (spawned as a child process by Electron)
+  - *Why:* Python is the undisputed king of AI scripting and media manipulation.
+  - *Core Libraries:* `ffmpeg-python` (media), `faster-whisper` (GPU-accelerated transcription), `sentence-transformers` (semantic matching).
+
+#### Deployment/Distribution
+- **Platform:** Electron Builder
+  - *Why:* Packages your React app, Python executables, and dependencies into a single runnable `.exe` for your machine.
+
+#### AI Assistance
+- **Primary:** Mix of Cursor (for generating component code) and Claude/ChatGPT (for architecture and complex FFmpeg graphs).
+
+## Project Structure
+
+```text
+splitty-ai/
+├── main/                 # Electron main process (Node.js)
+│   ├── main.ts           # App window creation
+│   └── ipcHandlers.ts    # Bridge between UI and Python
+├── src/                  # React Frontend
+│   ├── components/       # UI (UploadZone, Timeline, Config)
+│   ├── App.tsx           
+│   └── index.css         # Tailwind
+├── engine/               # Python Backend
+│   ├── main.py           # CLI entry point or API server
+│   ├── transcribe.py     # Whisper logic
+│   ├── match.py          # SBERT logic
+│   └── video.py          # FFmpeg logic
+├── package.json          
+└── requirements.txt      # Python dependencies

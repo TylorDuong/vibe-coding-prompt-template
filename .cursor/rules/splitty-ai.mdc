@@ -1,0 +1,28 @@
+# Cursor Rules for Splitty AI
+
+## Project Context
+**App:** Splitty AI  
+**Stack:** Electron + React + TypeScript + Tailwind + local Python engine  
+**Stage:** MVP Development  
+**User Level:** B (Developer)
+
+## Directives
+1. Read `AGENTS.md` first for current phase and constraints.
+2. Refer to `agent_docs/` for implementation details and requirements.
+3. Plan before coding; execute in small slices; verify after each slice.
+4. Keep business logic out of UI handlers; use service/core style boundaries.
+5. Maintain strict TypeScript typing and clear Python error handling.
+6. Keep app fully local-first for MVP; avoid cloud dependencies.
+
+## Commands
+- `npm run dev`
+- `npm test`
+- `npm run lint`
+- `npx tsc --noEmit`
+- `pytest`
+
+## Anti-Patterns
+- No deleting files without explicit confirmation.
+- No hidden schema/infrastructure changes.
+- No feature creep outside active phase.
+- No skipping tests/hooks to force completion.
