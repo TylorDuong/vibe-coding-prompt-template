@@ -11,14 +11,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import threading
 from collections import defaultdict
-from typing import Any
+from typing import Any, Callable
 
 from engine.result import EngineResult
-from engine.filler_words import strip_filler_words_from_segments
 from engine.face_zoom import (
     build_zoom_active_expression,
     compute_zoom_windows_output,
@@ -115,6 +116,51 @@ def _graphic_display_dimensions(path: str) -> tuple[int, int]:
 def _video_frame_dimensions(path: str) -> tuple[int, int]:
     """Coded frame size of the first video stream (matches overlay W/H on [vbase])."""
     return _ffprobe_stream_dimensions(path)
+
+
+def _video_avg_fps(path: str) -> float:
+    """Average frame rate of first video stream (fallback 30)."""
+    cmd = [
+        "ffprobe",
+        "-v",
+        "quiet",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=avg_frame_rate",
+        "-of",
+        "csv=p=0",
+        path,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0 or not result.stdout.strip():
+            return 30.0
+        raw = result.stdout.strip().split("\n")[0].strip()
+        if "/" in raw:
+            num, den = raw.split("/", 1)
+            d = float(den)
+            if d <= 0:
+                return 30.0
+            return max(1.0, min(120.0, float(num) / d))
+        return max(1.0, min(120.0, float(raw)))
+    except (ValueError, subprocess.SubprocessError, OSError):
+        return 30.0
+
+
+_TIME_RE = re.compile(
+    r"(?:out_time_ms|out_time)=(\d+)|time=(\d+):(\d+):(\d+\.?\d*)",
+)
+
+
+def _stderr_time_sec(line: str) -> float | None:
+    m = _TIME_RE.search(line)
+    if not m:
+        return None
+    if m.group(1) is not None:
+        return int(m.group(1)) / 1_000_000.0
+    h, mm, s = int(m.group(2)), int(m.group(3)), float(m.group(4))
+    return h * 3600 + mm * 60 + s
 
 
 def _overlay_dims_uniform(
@@ -365,13 +411,33 @@ def _output_duration_sec(keep_segments: list[dict[str, float]]) -> float:
     return sum(float(s["end"]) - float(s["start"]) for s in keep_segments)
 
 
-def _face_zoom_crop_filter(cx: float, cy: float, zf: float, active_expr: str) -> str:
-    return (
-        f"crop=w='if({active_expr}\\,iw/{zf:.4f}\\,iw)'"
-        f":h='if({active_expr}\\,ih/{zf:.4f}\\,ih)'"
-        f":x='if({active_expr}\\,(iw-iw/{zf:.4f})*{cx:.4f}\\,0)'"
-        f":y='if({active_expr}\\,(ih-ih/{zf:.4f})*{cy:.4f}\\,0)'"
-    )
+def _face_zoom_zoompan_filter(
+    frame_w: int,
+    frame_h: int,
+    fps: float,
+    cx: float,
+    cy: float,
+    zf: float,
+    active_expr: str,
+) -> str:
+    """Time-varying zoom using zoompan (per-frame `in_time`; crop was unreliable)."""
+    w = max(2, frame_w - frame_w % 2)
+    h = max(2, frame_h - frame_h % 2)
+    fp = max(1.0, min(fps, 120.0))
+    z_e = f"if({active_expr}\\,{zf:.6f}\\,1)"
+    x_e = f"if(eq(zoom\\,1)\\,0\\,max(0\\,min(iw*{cx:.6f}-iw/zoom/2\\,iw-iw/zoom)))"
+    y_e = f"if(eq(zoom\\,1)\\,0\\,max(0\\,min(ih*{cy:.6f}-ih/zoom/2\\,ih-ih/zoom)))"
+    return f"zoompan=z='{z_e}':x='{x_e}':y='{y_e}':d=1:s={w}x{h}:fps={fp:.4f}"
+
+
+def _graphic_fade_filters(gs: float, ge: float, fade_in: float, fade_out: float) -> str:
+    """setpts + rgba fades aligned to main timeline (seconds on output)."""
+    parts = [f"setpts=PTS+{gs:.6f}/TB", "format=rgba"]
+    if fade_in > 0.001:
+        parts.append(f"fade=t=in:st={gs:.3f}:d={fade_in:.3f}:alpha=1")
+    if fade_out > 0.001 and ge - fade_out > gs + 0.02:
+        parts.append(f"fade=t=out:st={ge - fade_out:.3f}:d={fade_out:.3f}:alpha=1")
+    return ",".join(parts)
 
 
 def _sfx_assignments_from_pool(sfx_pool: dict[str, str]) -> list[tuple[str, str, float]]:
@@ -517,6 +583,66 @@ def _write_temp_filter_complex_script(graph: str) -> str:
     return path
 
 
+def _execute_ffmpeg(
+    cmd: list[str],
+    *,
+    cwd: str | None,
+    timeout: int,
+    duration_out_sec: float,
+    progress_cb: Callable[[int], None] | None,
+) -> None:
+    """Run FFmpeg; optional stderr time parse → progress_cb(0..99)."""
+    if not progress_cb or duration_out_sec <= 0.001:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+        )
+        if result.returncode != 0:
+            tail = result.stderr[-800:] if result.stderr else ""
+            raise RuntimeError(f"FFmpeg exited with code {result.returncode}. {tail}")
+        return
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        bufsize=1,
+    )
+    stderr_chunks: list[str] = []
+    last_emitted = -1
+
+    def drain_stderr() -> None:
+        nonlocal last_emitted
+        if not proc.stderr:
+            return
+        for line in iter(proc.stderr.readline, ""):
+            stderr_chunks.append(line)
+            tsec = _stderr_time_sec(line)
+            if tsec is None:
+                continue
+            pct = int(min(99, max(0, 100.0 * tsec / duration_out_sec)))
+            if pct > last_emitted:
+                last_emitted = pct
+                progress_cb(pct)
+
+    reader = threading.Thread(target=drain_stderr, daemon=True)
+    reader.start()
+    proc.wait(timeout=timeout)
+    reader.join(timeout=60)
+    stderr = "".join(stderr_chunks)
+    if proc.returncode != 0:
+        tail = stderr[-800:] if stderr else ""
+        raise RuntimeError(f"FFmpeg exited with code {proc.returncode}. {tail}")
+    if progress_cb is not None:
+        progress_cb(100)
+
+
 def render_full(
     video_path: str,
     output_path: str,
@@ -542,11 +668,13 @@ def render_full(
     sfx_assignments: list[dict[str, Any]] | None = None,
     sfx_caption_every_n: int = 1,
     sfx_graphic_every_n: int = 1,
-    strip_fillers: bool = False,
+    graphic_fade_in_sec: float = 0.0,
+    graphic_fade_out_sec: float = 0.0,
     face_zoom_enabled: bool = False,
     face_zoom_interval_sec: float = 3.0,
     face_zoom_pulse_sec: float = 0.35,
     face_zoom_strength: float = 0.12,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> EngineResult:
     """Render the final video with captions, graphics, and SFX overlaid."""
     if not video_path or not os.path.isfile(video_path):
@@ -554,8 +682,7 @@ def render_full(
     if not output_path:
         return EngineResult(ok=False, error="output_path is required")
 
-    work_segments = strip_filler_words_from_segments(segments) if strip_fillers else segments
-    caption_chunks = build_caption_chunks(work_segments, max_words)
+    caption_chunks = build_caption_chunks(segments, max_words)
     caption_chunks = remap_caption_chunks(caption_chunks, keep_segments)
 
     gm_default = str(graphic_motion or "none").strip().lower()
@@ -593,6 +720,7 @@ def render_full(
     cx, cy = 0.5, 0.5
     zoom_expr = ""
     zf = 1.0 + max(0.0, min(float(face_zoom_strength), 0.45))
+    zoom_window_count = 0
     if face_zoom_enabled:
         fc = sample_face_center_normalized(video_path)
         if fc:
@@ -605,7 +733,8 @@ def render_full(
             max(0.05, min(float(face_zoom_pulse_sec), 2.0)),
             giv,
         )
-        zoom_expr = build_zoom_active_expression(zoom_windows)
+        zoom_window_count = len(zoom_windows)
+        zoom_expr = build_zoom_active_expression(zoom_windows, time_var="in_time")
 
     prepared_graphics: list[dict[str, Any]] = []
     temp_graphic_paths: list[str] = []
@@ -635,10 +764,13 @@ def render_full(
             graphic_position=str(graphic_position or "center"),
             graphic_motion_default=gm_default,
             graphic_anim_in_sec=max(0.0, float(graphic_anim_in_sec)),
+            graphic_fade_in_sec=max(0.0, float(graphic_fade_in_sec)),
+            graphic_fade_out_sec=max(0.0, float(graphic_fade_out_sec)),
             zoom_active_expr=zoom_expr,
             zoom_zf=zf,
             zoom_cx=cx,
             zoom_cy=cy,
+            progress_callback=progress_callback,
         )
     except Exception as exc:
         return EngineResult(ok=False, error=f"Full export failed: {exc}")
@@ -652,12 +784,15 @@ def render_full(
     if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
         return EngineResult(ok=False, error="Export produced an empty or missing file")
 
-    return EngineResult(ok=True, data={
+    data_out: dict[str, Any] = {
         "output_path": output_path,
         "captions_rendered": len(caption_chunks),
         "graphics_rendered": len(graphic_inputs),
         "sfx_rendered": len(sfx_plays),
-    })
+    }
+    if face_zoom_enabled:
+        data_out["face_zoom_windows"] = zoom_window_count
+    return EngineResult(ok=True, data=data_out)
 
 
 def _run_render(
@@ -679,22 +814,44 @@ def _run_render(
     graphic_position: str = "center",
     graphic_motion_default: str = "none",
     graphic_anim_in_sec: float = 0.25,
+    graphic_fade_in_sec: float = 0.0,
+    graphic_fade_out_sec: float = 0.0,
     zoom_active_expr: str = "",
     zoom_zf: float = 1.12,
     zoom_cx: float = 0.5,
     zoom_cy: float = 0.5,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> None:
     """Build and execute the FFmpeg command."""
     between_clauses = "+".join(
         f"between(t\\,{s['start']:.3f}\\,{s['end']:.3f})" for s in keep_segments
     )
 
+    use_complex = bool(graphic_inputs or sfx_plays)
+    probe_geo = use_complex or (zoom_active_expr and zoom_active_expr != "0")
+    if probe_geo:
+        main_w, main_h = _video_frame_dimensions(video_path)
+        base_fps = _video_avg_fps(video_path)
+    else:
+        main_w, main_h = 1280, 720
+        base_fps = 30.0
+
     vf_inner_parts = [
         f"select='{between_clauses}'",
         "setpts=N/FRAME_RATE/TB",
     ]
     if zoom_active_expr and zoom_active_expr != "0":
-        vf_inner_parts.append(_face_zoom_crop_filter(zoom_cx, zoom_cy, zoom_zf, zoom_active_expr))
+        vf_inner_parts.append(
+            _face_zoom_zoompan_filter(
+                main_w,
+                main_h,
+                base_fps,
+                zoom_cx,
+                zoom_cy,
+                zoom_zf,
+                zoom_active_expr,
+            )
+        )
 
     font_cwd, font_prefix = _drawtext_fontfile_prefix(bold=caption_bold)
     font_color = _hex_to_fontcolor(caption_font_color_hex)
@@ -728,7 +885,6 @@ def _run_render(
         )
     vf_inner = ",".join(vf_inner_parts)
 
-    use_complex = bool(graphic_inputs or sfx_plays)
     af_select = f"aselect='{between_clauses}',asetpts=N/SR/TB"
 
     inputs: list[str] = ["-i", video_path]
@@ -752,8 +908,6 @@ def _run_render(
             sfx_plays,
         )
         inputs.extend(sfx_argv)
-
-        main_w, main_h = _video_frame_dimensions(video_path)
 
         fc_video = f"[0:v]{vf_inner}[vbase]"
         current = "vbase"
@@ -783,17 +937,39 @@ def _run_render(
                 mo,
                 ain,
             )
-            fc_video += (
-                f";[{inp_idx}:v]setsar=1[{gi}]"
-                f";[{gi}][{current}]scale2ref=w={ow}:h={oh}:force_original_aspect_ratio=disable"
-                f"[{gs}][{vb}]"
-                f";[{gs}]setsar=1[{gss}]"
-                f";[{vb}][{gss}]overlay="
-                f"x='{ox}':y='{oy}'"
-                f":eval=frame"
-                f":enable='{enable}'"
-                f"[{out_lab}]"
-            )
+            gs0 = f"gss0{i}"
+            gf_in = max(0.0, float(graphic_fade_in_sec))
+            gf_out = max(0.0, float(graphic_fade_out_sec))
+            if gf_in > 0.001 or gf_out > 0.001:
+                fade_chain = _graphic_fade_filters(
+                    float(g["start"]),
+                    float(g["end"]),
+                    gf_in,
+                    gf_out,
+                )
+                fc_video += (
+                    f";[{inp_idx}:v]setsar=1[{gi}]"
+                    f";[{gi}][{current}]scale2ref=w={ow}:h={oh}:force_original_aspect_ratio=disable"
+                    f"[{gs}][{vb}]"
+                    f";[{gs}]setsar=1[{gs0}];[{gs0}]{fade_chain}[{gss}]"
+                    f";[{vb}][{gss}]overlay="
+                    f"x='{ox}':y='{oy}'"
+                    f":eval=frame"
+                    f":enable='{enable}'"
+                    f"[{out_lab}]"
+                )
+            else:
+                fc_video += (
+                    f";[{inp_idx}:v]setsar=1[{gi}]"
+                    f";[{gi}][{current}]scale2ref=w={ow}:h={oh}:force_original_aspect_ratio=disable"
+                    f"[{gs}][{vb}]"
+                    f";[{gs}]setsar=1[{gss}]"
+                    f";[{vb}][{gss}]overlay="
+                    f"x='{ox}':y='{oy}'"
+                    f":eval=frame"
+                    f":enable='{enable}'"
+                    f"[{out_lab}]"
+                )
             current = out_lab
 
         af_main = f"[0:a]{af_select}[mainaud]"
@@ -813,19 +989,16 @@ def _run_render(
             + extra_args
             + [output_path]
         )
-        result = subprocess.run(
+        dur_out = _output_duration_sec(keep_segments)
+        _execute_ffmpeg(
             cmd,
-            capture_output=True,
-            text=True,
-            timeout=900,
             cwd=font_cwd,
+            timeout=900,
+            duration_out_sec=dur_out,
+            progress_cb=progress_callback,
         )
     finally:
         try:
             os.unlink(script_path)
         except OSError:
             pass
-
-    if result.returncode != 0:
-        stderr_tail = result.stderr[-800:] if result.stderr else ""
-        raise RuntimeError(f"FFmpeg exited with code {result.returncode}. {stderr_tail}")

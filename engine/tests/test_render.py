@@ -169,3 +169,103 @@ def test_overlay_dims_tall_on_vertical_frame() -> None:
     ow, oh = _overlay_dims_uniform(1080, 1920, 400, 2000, 0.95)
     assert oh == 1920
     assert ow == 384
+
+
+def test_render_full_face_zoom_uses_zoompan(test_video_with_audio: str, monkeypatch) -> None:
+    from engine import render as render_mod
+
+    captured: list[str] = []
+    real_write = render_mod._write_temp_filter_complex_script
+
+    def wrap(graph: str) -> str:
+        captured.append(graph)
+        return real_write(graph)
+
+    monkeypatch.setattr(render_mod, "_write_temp_filter_complex_script", wrap)
+
+    out = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    out.close()
+    segments = [
+        {
+            "start": 0.0,
+            "end": 1.0,
+            "text": "Hi",
+            "words": [{"word": " Hi", "start": 0.0, "end": 0.5}],
+        },
+    ]
+    try:
+        result = render_mod.render_full(
+            video_path=test_video_with_audio,
+            output_path=out.name,
+            segments=segments,
+            matches=[],
+            sfx_pool={},
+            keep_segments=[{"start": 0.0, "end": 3.0}],
+            events=[],
+            face_zoom_enabled=True,
+            face_zoom_interval_sec=2.0,
+            face_zoom_pulse_sec=0.3,
+            face_zoom_strength=0.15,
+        )
+        assert result.ok is True, result.error
+        joined = "\n".join(captured)
+        assert "zoompan" in joined
+    finally:
+        if os.path.exists(out.name):
+            os.unlink(out.name)
+
+
+def test_render_full_graphic_fade_in_filter(test_video_with_audio: str, tmp_path, monkeypatch) -> None:
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from engine import render as render_mod
+
+    png = tmp_path / "overlay.png"
+    Image.new("RGBA", (80, 80), (200, 50, 50, 255)).save(png)
+
+    captured: list[str] = []
+    real_write = render_mod._write_temp_filter_complex_script
+
+    def wrap(graph: str) -> str:
+        captured.append(graph)
+        return real_write(graph)
+
+    monkeypatch.setattr(render_mod, "_write_temp_filter_complex_script", wrap)
+
+    out = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    out.close()
+    segments = [
+        {
+            "start": 0.0,
+            "end": 2.0,
+            "text": "Show graphic",
+            "words": [{"word": " Show", "start": 0.0, "end": 0.4}],
+        },
+    ]
+    matches = [
+        {
+            "graphic": str(png),
+            "similarity": 1.0,
+            "matched_segment_start": 0.2,
+            "matched_segment_end": 1.5,
+        },
+    ]
+    try:
+        result = render_mod.render_full(
+            video_path=test_video_with_audio,
+            output_path=out.name,
+            segments=segments,
+            matches=matches,
+            sfx_pool={},
+            keep_segments=[{"start": 0.0, "end": 3.0}],
+            events=[],
+            graphic_fade_in_sec=0.2,
+            graphic_fade_out_sec=0.2,
+        )
+        assert result.ok is True, result.error
+        joined = "\n".join(captured)
+        assert "fade=t=in" in joined
+        assert "format=rgba" in joined
+    finally:
+        if os.path.exists(out.name):
+            os.unlink(out.name)

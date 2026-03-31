@@ -1,7 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+export type ExportProgressPayload = {
+  percent: number
+}
+
 export type ElectronAPI = {
   invoke: (channel: string, data?: unknown) => Promise<unknown>
+  /** Subscribe to FFmpeg export percent (0–100). Returns an unsubscribe function. */
+  onExportProgress: (callback: (payload: ExportProgressPayload) => void) => () => void
 }
 
 const ALLOWED_CHANNELS = [
@@ -27,7 +33,19 @@ const electronAPI: ElectronAPI = {
       return Promise.reject(new Error(`IPC channel not allowed: ${channel}`))
     }
     return ipcRenderer.invoke(channel, data)
-  }
+  },
+  onExportProgress: (callback: (payload: ExportProgressPayload) => void) => {
+    const channel = 'engine:exportProgress'
+    const handler = (_evt: unknown, payload: ExportProgressPayload) => {
+      if (payload && typeof payload.percent === 'number') {
+        callback({ percent: payload.percent })
+      }
+    }
+    ipcRenderer.on(channel, handler)
+    return () => {
+      ipcRenderer.removeListener(channel, handler)
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('electron', electronAPI)

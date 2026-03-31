@@ -5,7 +5,7 @@ DO NOT delete historical context if it is still relevant. Compress older complet
 -->
 
 ## 🏗️ Active Phase & Goal
-**Current Phase:** MVP Complete — Post-overlay enhancement pass landed (caption/graphic styling, timeline src/out times, SFX throttle + per-slot volume, optional face-zoom pulses, filler-word stripping for captions).
+**Current Phase:** MVP Complete — Post-overlay enhancement pass: caption/graphic styling, timeline src/out times, SFX throttle + per-slot volume, optional face-zoom pulses (`zoompan` + `in_time`), graphic alpha fade, export FFmpeg progress, timeline scrubber + video preview, caption live preview; filler-word stripping removed.
 **Status:** Ready for production use; validate new export options with real footage (especially face zoom + FFmpeg drawtext alpha on your installed FFmpeg build).
 
 ## 📂 Architectural Decisions

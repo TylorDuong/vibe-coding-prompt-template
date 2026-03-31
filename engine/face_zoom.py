@@ -156,11 +156,17 @@ def _merge_intervals(intervals: list[tuple[float, float]]) -> list[tuple[float, 
     return merged
 
 
-def build_zoom_active_expression(windows: list[tuple[float, float]]) -> str:
-    """FFmpeg expr fragment: 1 inside any window, else 0. Uses main video time `t`."""
+def build_zoom_active_expression(
+    windows: list[tuple[float, float]],
+    time_var: str = "t",
+) -> str:
+    """FFmpeg expr fragment: 1 inside any window, else 0.
+
+    Use time_var='t' for drawtext/overlay on the cut timeline; use 'in_time' inside zoompan.
+    """
     if not windows:
         return "0"
     expr = "0"
     for a, b in reversed(windows[:48]):
-        expr = f"if(between(t\\,{a:.3f}\\,{b:.3f})\\,1\\,{expr})"
+        expr = f"if(between({time_var}\\,{a:.3f}\\,{b:.3f})\\,1\\,{expr})"
     return expr

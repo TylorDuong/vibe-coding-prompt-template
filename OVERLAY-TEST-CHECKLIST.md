@@ -4,13 +4,17 @@
 
 When you add, remove, rename, or change the type/range of any field under **Processing** or **Caption and export** in the UI:
 
-1. **[`src/renderer/src/lib/pipelineConfigPreset.ts`](src/renderer/src/lib/pipelineConfigPreset.ts)** — Update `DEFAULT_PIPELINE_CONFIG`, `mergePipelineConfigFromUnknown`, and bump `SPLITTY_PRESET_VERSION` if old JSON files must not load unchanged.
+1. **[`src/renderer/src/lib/pipelineConfigPreset.ts`](src/renderer/src/lib/pipelineConfigPreset.ts)** — Update `DEFAULT_PIPELINE_CONFIG`, `mergePipelineConfigFromUnknown`, and bump `SPLITTY_PRESET_VERSION` only if old JSON files must not load unchanged.
 2. **[`engine/main.py`](engine/main.py)** — Extend `exportFull` sanitization and `render_full` arguments for any new engine behavior.
 3. **[`src/main/ipcHandlers.ts`](src/main/ipcHandlers.ts)** — Clamp or validate new fields on the export IPC payload.
 4. **[`OVERLAY-TEST-CHECKLIST.md`](OVERLAY-TEST-CHECKLIST.md)** — Add or adjust a row in the roadmap table, Test 7 sample JSON note if needed, and any new manual verification bullets.
 5. Run **`npm test`**, **`python -m pytest engine/tests/`**, and **`npm run typecheck`**.
 
 Sound-effect **slots** (files, triggers, volume) are not included in the JSON preset; only **pipeline** / **caption & export** options are.
+
+**Removed from presets:** `removeFillerWords` (feature dropped). Unknown keys in imported JSON are ignored.
+
+**New preset keys:** `graphicFadeInSec`, `graphicFadeOutSec` (seconds; 0 = off).
 
 ---
 
@@ -83,7 +87,7 @@ Sound-effect **slots** (files, triggers, volume) are not included in the JSON pr
 3. Reset fields manually or restart the app; click **Import JSON…** and pick the same file
 
 **Verify:**
-- [ ] Exported file contains `splittyPresetVersion: 1` and a `pipelineConfig` object with all current fields
+- [ ] Exported file contains `splittyPresetVersion: 1` and a `pipelineConfig` object with all current fields (including `graphicFadeInSec` / `graphicFadeOutSec` when present)
 - [ ] After import, UI values match the saved preset
 - [ ] Processing and export behave consistently with the restored settings
 
@@ -103,12 +107,15 @@ Implementation roadmap. **Status:** Shipped = in codebase; **Backlog** = not sta
 | C | SFX frequency (every Nth caption/graphic) | S | Shipped |
 | C | SFX volume per slot | M | Shipped |
 | C | Attention length vs SFX density | S | Shipped (existing control) |
-| D | Face-driven zoom pulses (local OpenCV) | L | Shipped (optional flag) |
-| E | Filler word stripping (text only) | S | Shipped |
+| D | Face-driven zoom pulses (local OpenCV) | L | Shipped (optional flag; export uses `zoompan` + `in_time`) |
+| UI | Caption live preview in config | S | Shipped |
+| UI | Workspace layout: transcript row + graphics column, export below | M | Shipped |
 | — | Multiple SFX per same trigger (round-robin) | M | Shipped |
 | Preset | JSON import/export for `PipelineConfig` | S | Shipped |
-| — | Timeline scrubber + export % progress | L | Backlog |
-| — | Full graphic fade synced to main timeline | L | Backlog |
+| — | Timeline scrubber + optional `local-file://` video preview | M | Shipped |
+| — | Export progress percentage (FFmpeg stderr → stdout → IPC) | M | Shipped |
+| — | Full graphic fade synced to main timeline (`fade` + `setpts` on overlay) | M | Shipped |
+| E | Filler word stripping (text only) | — | **Removed** |
 
 ---
 
@@ -120,8 +127,8 @@ Implementation roadmap. **Status:** Shipped = in codebase; **Backlog** = not sta
 **Verification (implementation):** [x] Code path covered by integration with timeline UI.
 
 **Manual verification (re-run after FFmpeg / silence algorithm changes):**
-- [ ] Process a clip with removable silence; open Timeline Events.
-- [ ] Each row shows **src** and **out** times; **out** matches export roughly for captions/graphics.
+- [X] Process a clip with removable silence; open Timeline Events.
+- [X] Each row shows **src** and **out** times; **out** matches export roughly for captions/graphics.
 
 ### Enhancement A2 — Caption styling
 **Goal:** Large centered captions, custom color, optional background box (TikTok-style).
@@ -131,9 +138,21 @@ Implementation roadmap. **Status:** Shipped = in codebase; **Backlog** = not sta
 **Verification (implementation):** [x]
 
 **Manual verification:**
-- [ ] Set position **Center**, size **48**, color **#FFE066**, export — text matches.
-- [ ] Toggle **Caption background** — readability improves on busy footage.
-- [ ] **Bold** uses a bold-capable font path (Windows: Segoe UI Bold when available).
+- [X] Set position **Center**, size **48**, color **#FFE066**, export — text matches.
+- [X] Toggle **Caption background** — readability improves on busy footage.
+- [X] **Bold** uses a bold-capable font path (Windows: Segoe UI Bold when available).
+
+### Enhancement UI — Caption preview
+**Goal:** See approximate caption size, color, bold, box, outline, and bottom vs center in a small 16:9 frame before export.
+
+**Manual verification:**
+- [ ] Change caption settings — preview updates; **Bottom** vs **Center** is obvious.
+
+### Enhancement UI — Workspace layout
+**Goal:** Transcript + timeline share a row with the graphics list; export sits below.
+
+**Manual verification:**
+- [ ] After process: scrubber and transcript left (flex), graphics narrow column right; **Export Video** is under the row.
 
 ### Enhancement A3 — Graphic position
 **Goal:** Place graphics at center (default) or corners / top / bottom.
@@ -141,7 +160,7 @@ Implementation roadmap. **Status:** Shipped = in codebase; **Backlog** = not sta
 **Verification (implementation):** [x]
 
 **Manual verification:**
-- [ ] Set **Top right**, export — graphic sits in corner without clipping oddly at common resolutions.
+- [X] Set **Top right**, export — graphic sits in corner without clipping oddly at common resolutions.
 
 ### Enhancement B — Caption / graphic motion
 **Goal:** Short fade on caption lines; slide-in for graphics when enabled.
@@ -149,8 +168,8 @@ Implementation roadmap. **Status:** Shipped = in codebase; **Backlog** = not sta
 **Verification (implementation):** [x]
 
 **Manual verification:**
-- [ ] Set caption fade in/out **0.15** s — no pop-in; timing still aligned with speech.
-- [ ] Graphic **Slide in** — motion completes within the graphic window; no tearing.
+- [X] Set caption fade in/out **0.15** s — no pop-in; timing still aligned with speech.
+- [X] Graphic **Slide in** — motion completes within the graphic window; no tearing.
 
 ### Enhancement C — SFX density and volume
 **Goal:** Fewer (or more) caption/graphic SFX via **every N**; per-slot volume **0–200%**.
@@ -164,25 +183,31 @@ Implementation roadmap. **Status:** Shipped = in codebase; **Backlog** = not sta
 ### Enhancement D — Face zoom (optional)
 **Goal:** Periodic zoom toward detected face on **output** timeline (pulses), strength and interval configurable.
 
-**Implementation:** `opencv-python-headless` + Haar cascade; optional; if OpenCV missing or no face, falls back to center crop.
+**Implementation:** `opencv-python-headless` + Haar cascade; optional; if OpenCV missing or no face, falls back to center crop. Filter stage uses **`zoompan`** with **`in_time`** in the active expression (avoids broken dynamic `crop`).
 
-**Verification (implementation):** [x]
+**Verification (implementation):** [x] `engine/tests/test_render.py` asserts `zoompan` in filter graph when enabled.
 
 **Manual verification:**
-- [ ] Enable face zoom, export talking-head clip — subtle zoom pulses.
-- [ ] Disable — identical to previous behavior.
+- [ ] Enable face zoom, export talking-head clip — subtle zoom pulses visible.
+- [ ] Disable — no zoom pulses.
 - [ ] Profile / no face — no crash; neutral crop.
 
-### Enhancement E — Filler words
-**Goal:** Remove common fillers from **caption text** only (transcript words dropped before chunking).
-
-**Verification (implementation):** [x]
+### Enhancement — Timeline scrubber + preview
+**Goal:** Drag/click playhead on the bar; optional `<video>` seeks via `local-file://`.
 
 **Manual verification:**
-- [ ] Enable **Remove filler words**, export — “um” / “uh” absent from captions when Whisper separated them.
-- [ ] Audio unchanged (filler may still be audible).
+- [ ] Drag playhead — time label updates; video frame follows (if preview visible).
 
-### Backlog (not implemented)
-- [ ] Timeline scrubber in-app preview
-- [ ] Export progress percentage
-- [ ] Full graphic fade synced to main timeline (complex FFmpeg graph)
+### Enhancement — Export progress
+**Goal:** Linear 0–100% while FFmpeg runs.
+
+**Manual verification:**
+- [ ] Long export — percent advances; completes at 100%.
+
+### Enhancement — Graphic fade (alpha)
+**Goal:** Fade graphics in/out on the main export timeline (`graphicFadeInSec` / `graphicFadeOutSec`).
+
+**Verification (implementation):** [x] `engine/tests/test_render.py` asserts `fade=t=in` and `format=rgba` when fades > 0.
+
+**Manual verification:**
+- [ ] Set **Gfx fade in/out** to ~0.25s, export with a matched graphic — soft edges at start/end.

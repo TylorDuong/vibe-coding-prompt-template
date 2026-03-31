@@ -47,7 +47,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   graphicAnimInSec: 0.25,
   sfxCaptionEveryN: 1,
   sfxGraphicEveryN: 1,
-  removeFillerWords: false,
+  graphicFadeInSec: 0,
+  graphicFadeOutSec: 0,
   faceZoomEnabled: false,
   faceZoomIntervalSec: 3,
   faceZoomPulseSec: 0.35,
@@ -207,10 +208,20 @@ export function mergePipelineConfigFromUnknown(
       1,
       20,
     ),
-    removeFillerWords:
-      typeof g('removeFillerWords') === 'boolean'
-        ? (g('removeFillerWords') as boolean)
-        : defaults.removeFillerWords,
+    graphicFadeInSec: clamp(
+      typeof g('graphicFadeInSec') === 'number'
+        ? (g('graphicFadeInSec') as number)
+        : defaults.graphicFadeInSec,
+      0,
+      5,
+    ),
+    graphicFadeOutSec: clamp(
+      typeof g('graphicFadeOutSec') === 'number'
+        ? (g('graphicFadeOutSec') as number)
+        : defaults.graphicFadeOutSec,
+      0,
+      5,
+    ),
     faceZoomEnabled:
       typeof g('faceZoomEnabled') === 'boolean'
         ? (g('faceZoomEnabled') as boolean)

@@ -210,8 +210,7 @@ function App(): React.JSX.Element {
         <span className="text-xs text-zinc-600">v0.2.0</span>
       </header>
 
-      <main className="flex flex-1 overflow-hidden">
-        {/* Workspace area */}
+      <main className="flex flex-1 flex-col overflow-hidden">
         <section className="flex flex-1 flex-col overflow-auto pb-4">
           {loadedFile ? (
             <>
@@ -272,44 +271,54 @@ function App(): React.JSX.Element {
                 </div>
               )}
 
+              <div className="mx-4 mt-3 flex min-h-[min(280px,42vh)] flex-row items-stretch gap-3">
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  {pipeline.result && displayTimeline ? (
+                    <TimelinePreview
+                      videoPath={loadedFile.filePath}
+                      timeline={displayTimeline}
+                      keepSegments={pipeline.result.keepSegments ?? []}
+                      attentionLengthMs={config.attentionLengthMs}
+                      selectedGraphicId={selectedGraphicId}
+                      wordTriggers={wordTriggers}
+                      onWordAssign={handleWordAssign}
+                    />
+                  ) : (
+                    <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-4 py-10 text-center text-xs text-zinc-500">
+                      Run <span className="mx-1 font-medium text-zinc-400">Process video</span> to open the
+                      transcript, timeline scrubber, and preview. Add graphics on the right anytime.
+                    </div>
+                  )}
+                </div>
+                <GraphicsSidebar
+                  embedded
+                  graphics={graphics}
+                  onAdd={handleAddGraphic}
+                  onRemove={handleRemoveGraphic}
+                  onTagChange={handleTagChange}
+                  selectedId={selectedGraphicId}
+                  onSelect={setSelectedGraphicId}
+                  wordTriggers={wordTriggers}
+                  onClearPlacement={handleClearWordPlacement}
+                />
+              </div>
+
               {pipeline.result && displayTimeline && (
-                <>
-                  <ExportVideoButton
-                    videoPath={loadedFile.filePath}
-                    config={config}
-                    pipelineResult={pipeline.result}
-                    exportMatches={exportMatches}
-                    sfxPool={buildSfxPool(sfxSlots)}
-                    sfxAssignments={buildSfxAssignments(sfxSlots)}
-                    disabled={isProcessing}
-                  />
-                  <TimelinePreview
-                    timeline={displayTimeline}
-                    keepSegments={pipeline.result.keepSegments ?? []}
-                    attentionLengthMs={config.attentionLengthMs}
-                    selectedGraphicId={selectedGraphicId}
-                    wordTriggers={wordTriggers}
-                    onWordAssign={handleWordAssign}
-                  />
-                </>
+                <ExportVideoButton
+                  videoPath={loadedFile.filePath}
+                  config={config}
+                  pipelineResult={pipeline.result}
+                  exportMatches={exportMatches}
+                  sfxPool={buildSfxPool(sfxSlots)}
+                  sfxAssignments={buildSfxAssignments(sfxSlots)}
+                  disabled={isProcessing}
+                />
               )}
             </>
           ) : (
             <UploadZone onFileAccepted={handleFileAccepted} />
           )}
         </section>
-
-        {/* Graphics sidebar */}
-        <GraphicsSidebar
-          graphics={graphics}
-          onAdd={handleAddGraphic}
-          onRemove={handleRemoveGraphic}
-          onTagChange={handleTagChange}
-          selectedId={selectedGraphicId}
-          onSelect={setSelectedGraphicId}
-          wordTriggers={wordTriggers}
-          onClearPlacement={handleClearWordPlacement}
-        />
       </main>
 
       {/* Status bar */}

@@ -235,7 +235,8 @@ def handle(message: dict) -> EngineResult:
         graphic_anim_in = float(sanitize_number(message.get("graphicAnimInSec"), 0.0, 3.0, 0.25))
         sfx_cap_n = int(sanitize_number(message.get("sfxCaptionEveryN"), 1, 20, 1))
         sfx_gfx_n = int(sanitize_number(message.get("sfxGraphicEveryN"), 1, 20, 1))
-        strip_fillers = bool(message.get("removeFillerWords"))
+        graphic_fade_in = float(sanitize_number(message.get("graphicFadeInSec"), 0.0, 5.0, 0.0))
+        graphic_fade_out = float(sanitize_number(message.get("graphicFadeOutSec"), 0.0, 5.0, 0.0))
         face_zoom_on = bool(message.get("faceZoomEnabled"))
         face_zoom_iv = float(sanitize_number(message.get("faceZoomIntervalSec"), 0.5, 30.0, 3.0))
         face_zoom_pulse = float(sanitize_number(message.get("faceZoomPulseSec"), 0.05, 2.0, 0.35))
@@ -264,6 +265,12 @@ def handle(message: dict) -> EngineResult:
         )
         events = ev_result.data.get("events", []) if ev_result.ok and ev_result.data else []
 
+        def _emit_export_progress(percent: int) -> None:
+            sys.stdout.write(
+                json.dumps({"_exportProgress": {"percent": int(percent)}}) + "\n"
+            )
+            sys.stdout.flush()
+
         result = render_full(
             video_path=video_path,
             output_path=output_path,
@@ -289,11 +296,13 @@ def handle(message: dict) -> EngineResult:
             sfx_assignments=sfx_assignments,
             sfx_caption_every_n=sfx_cap_n,
             sfx_graphic_every_n=sfx_gfx_n,
-            strip_fillers=strip_fillers,
+            graphic_fade_in_sec=graphic_fade_in,
+            graphic_fade_out_sec=graphic_fade_out,
             face_zoom_enabled=face_zoom_on,
             face_zoom_interval_sec=face_zoom_iv,
             face_zoom_pulse_sec=face_zoom_pulse,
             face_zoom_strength=face_zoom_str,
+            progress_callback=_emit_export_progress,
         )
         if result.ok and result.data is not None:
             new_dur = sum(float(s["end"]) - float(s["start"]) for s in keep_segments)

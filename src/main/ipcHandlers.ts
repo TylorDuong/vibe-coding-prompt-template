@@ -208,7 +208,7 @@ export function registerIpcHandlers(): void {
     })
   })
 
-  ipcMain.handle('engine:exportFull', async (_event, payload: unknown) => {
+  ipcMain.handle('engine:exportFull', async (event, payload: unknown) => {
     const p = payload as Record<string, unknown>
     const videoPath = validateFilePath(p.videoPath)
     if (!videoPath) return ipcError('Invalid or missing video file path.')
@@ -261,15 +261,21 @@ export function registerIpcHandlers(): void {
         graphicPosition: gpos,
         graphicMotion: gmot,
         graphicAnimInSec: clampNumber(p.graphicAnimInSec, 0, 3, 0.25),
+        graphicFadeInSec: clampNumber(p.graphicFadeInSec, 0, 5, 0),
+        graphicFadeOutSec: clampNumber(p.graphicFadeOutSec, 0, 5, 0),
         sfxCaptionEveryN: clampNumber(p.sfxCaptionEveryN, 1, 20, 1),
         sfxGraphicEveryN: clampNumber(p.sfxGraphicEveryN, 1, 20, 1),
-        removeFillerWords: Boolean(p.removeFillerWords),
         faceZoomEnabled: Boolean(p.faceZoomEnabled),
         faceZoomIntervalSec: clampNumber(p.faceZoomIntervalSec, 0.5, 30, 3),
         faceZoomPulseSec: clampNumber(p.faceZoomPulseSec, 0.05, 2, 0.35),
         faceZoomStrength: clampNumber(p.faceZoomStrength, 0, 0.45, 0.12),
       },
-      { timeoutMs: LONG_ENGINE_TIMEOUT_MS },
+      {
+        timeoutMs: LONG_ENGINE_TIMEOUT_MS,
+        onExportProgress: (prog) => {
+          event.sender.send('engine:exportProgress', prog)
+        },
+      },
     )
   })
 }

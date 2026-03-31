@@ -65,7 +65,10 @@ export type PipelineConfig = {
   graphicAnimInSec: number
   sfxCaptionEveryN: number
   sfxGraphicEveryN: number
-  removeFillerWords: boolean
+  /** Alpha fade-in at graphic start on export timeline (seconds). */
+  graphicFadeInSec: number
+  /** Alpha fade-out before graphic end on export timeline (seconds). */
+  graphicFadeOutSec: number
   faceZoomEnabled: boolean
   faceZoomIntervalSec: number
   faceZoomPulseSec: number

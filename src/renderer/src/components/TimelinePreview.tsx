@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import TimelineBar from './TimelineBar'
 import type { KeepSegment } from '../lib/timelineRemap'
 import { sourceTimeToOutput } from '../lib/timelineRemap'
@@ -56,6 +56,8 @@ type TimelinePreviewProps = {
   selectedGraphicId: string | null
   wordTriggers: Record<string, WordTrigger>
   onWordAssign: (payload: { start: number; end: number; word: string }) => void
+  /** Source video for optional scrub preview (`local-file://`). */
+  videoPath?: string
 }
 
 const EVENT_STYLES: Record<string, { bg: string; label: string; color: string }> = {
@@ -108,6 +110,7 @@ export default function TimelinePreview({
   selectedGraphicId,
   wordTriggers,
   onWordAssign,
+  videoPath,
 }: TimelinePreviewProps): React.JSX.Element {
   const silences = timeline.silences ?? []
   const events = timeline.events ?? []
@@ -115,9 +118,26 @@ export default function TimelinePreview({
   const totalSilence = silences.reduce((sum, s) => sum + (s.end - s.start), 0)
   const duration = timeline.video?.duration ?? 0
   const hasRemap = keepSegments.length > 0
+  const [scrubTime, setScrubTime] = useState(0)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    setScrubTime(0)
+  }, [duration, videoPath])
+
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v || !videoPath) return
+    if (!Number.isFinite(scrubTime) || scrubTime < 0) return
+    const cap = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : duration
+    const t = cap > 0 ? Math.min(scrubTime, cap) : scrubTime
+    if (Math.abs(v.currentTime - t) > 0.04) {
+      v.currentTime = t
+    }
+  }, [scrubTime, videoPath, duration])
 
   return (
-    <div className="m-4 space-y-4 overflow-auto rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <div className="min-h-0 flex-1 space-y-4 overflow-auto rounded-lg border border-zinc-800 bg-zinc-900 p-4">
       <h3 className="text-sm font-medium text-zinc-300">Pipeline Result</h3>
 
       {/* Summary chips */}
@@ -141,8 +161,32 @@ export default function TimelinePreview({
         </span>
       </div>
 
-      {/* Visual timeline bar */}
-      {duration > 0 && <TimelineBar events={events} duration={duration} />}
+      {/* Visual timeline bar + scrubber */}
+      {duration > 0 && (
+        <TimelineBar
+          events={events}
+          duration={duration}
+          scrubTime={scrubTime}
+          onScrubTimeChange={setScrubTime}
+        />
+      )}
+
+      {videoPath && duration > 0 && (
+        <video
+          ref={videoRef}
+          src={`local-file://${encodeURIComponent(videoPath)}`}
+          className="aspect-video w-full rounded border border-zinc-800 bg-black"
+          controls
+          playsInline
+          preload="metadata"
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget
+            if (Number.isFinite(v.duration) && scrubTime > v.duration) {
+              setScrubTime(v.duration)
+            }
+          }}
+        />
+      )}
 
       {/* Collapsible event list */}
       {events.length > 0 && (

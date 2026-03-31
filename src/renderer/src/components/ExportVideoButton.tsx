@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import type { PipelineConfig, PipelineResult } from '../hooks/useProcessPipeline'
 import type { SfxExportAssignment, SfxPool } from './SfxPoolPanel'
 
@@ -28,6 +28,7 @@ type ExportResult = {
     original_duration?: number
     new_duration?: number
     silences_removed?: number
+    face_zoom_windows?: number
   }
   error?: string
 }
@@ -42,8 +43,17 @@ export default function ExportVideoButton({
   disabled,
 }: ExportVideoButtonProps): React.JSX.Element {
   const [isExporting, setIsExporting] = useState(false)
+  const [exportPercent, setExportPercent] = useState(0)
   const [result, setResult] = useState<ExportResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const unsubProgressRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    return () => {
+      unsubProgressRef.current?.()
+      unsubProgressRef.current = null
+    }
+  }, [])
 
   const handleExport = useCallback(async () => {
     setError(null)
@@ -57,6 +67,11 @@ export default function ExportVideoButton({
       if (dialogResult.canceled || !dialogResult.filePath) return
 
       setIsExporting(true)
+      setExportPercent(0)
+      unsubProgressRef.current?.()
+      unsubProgressRef.current = window.electron.onExportProgress((p) => {
+        setExportPercent((prev) => Math.max(prev, p.percent))
+      })
 
       const exportResult = (await window.electron.invoke('engine:exportFull', {
         videoPath,
@@ -85,9 +100,10 @@ export default function ExportVideoButton({
         graphicPosition: config.graphicPosition,
         graphicMotion: config.graphicMotion,
         graphicAnimInSec: config.graphicAnimInSec,
+        graphicFadeInSec: config.graphicFadeInSec,
+        graphicFadeOutSec: config.graphicFadeOutSec,
         sfxCaptionEveryN: config.sfxCaptionEveryN,
         sfxGraphicEveryN: config.sfxGraphicEveryN,
-        removeFillerWords: config.removeFillerWords,
         faceZoomEnabled: config.faceZoomEnabled,
         faceZoomIntervalSec: config.faceZoomIntervalSec,
         faceZoomPulseSec: config.faceZoomPulseSec,
@@ -102,6 +118,8 @@ export default function ExportVideoButton({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Export failed')
     } finally {
+      unsubProgressRef.current?.()
+      unsubProgressRef.current = null
       setIsExporting(false)
     }
   }, [videoPath, config, pipelineResult, exportMatches, sfxPool, sfxAssignments])
@@ -123,12 +141,21 @@ export default function ExportVideoButton({
         {isExporting ? (
           <span className="flex items-center justify-center gap-2">
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-zinc-600 border-t-white" />
-            Exporting video…
+            Exporting… {exportPercent}%
           </span>
         ) : (
           'Export Video'
         )}
       </button>
+
+      {isExporting && (
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+          <div
+            className="h-full bg-emerald-500 transition-[width] duration-200 ease-out"
+            style={{ width: `${Math.min(100, Math.max(0, exportPercent))}%` }}
+          />
+        </div>
+      )}
 
       {result?.data && (
         <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3 space-y-1">

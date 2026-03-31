@@ -17,6 +17,8 @@ type GraphicsSidebarProps = {
   /** Set when user linked a transcript word to this graphic */
   wordTriggers: Record<string, { start: number; word: string }>
   onClearPlacement: (id: string) => void
+  /** Next to transcript column (rounded card) vs full-height page rail */
+  embedded?: boolean
 }
 
 type DialogImagesResult = {
@@ -41,6 +43,7 @@ export default function GraphicsSidebar({
   onSelect,
   wordTriggers,
   onClearPlacement,
+  embedded = false,
 }: GraphicsSidebarProps): React.JSX.Element {
   const [isDragging, setIsDragging] = useState(false)
 
@@ -99,8 +102,16 @@ export default function GraphicsSidebar({
   }, [])
 
   return (
-    <aside className="flex w-72 flex-col border-l border-zinc-800 bg-zinc-950">
-      <div className="border-b border-zinc-800 px-4 py-3 space-y-1">
+    <aside
+      className={
+        embedded
+          ? 'flex w-72 shrink-0 flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 min-h-0 max-h-[min(78vh,880px)]'
+          : 'flex w-72 flex-col border-l border-zinc-800 bg-zinc-950'
+      }
+    >
+      <div
+        className={`space-y-1 border-b border-zinc-800 ${embedded ? 'px-3 py-2' : 'px-4 py-3'}`}
+      >
         <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
           Graphics ({graphics.length})
         </h2>
@@ -116,7 +127,7 @@ export default function GraphicsSidebar({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         className={`
-          mx-3 mt-3 flex flex-col items-center gap-2 rounded border border-dashed p-3
+          ${embedded ? 'mx-2' : 'mx-3'} mt-3 flex flex-col items-center gap-2 rounded border border-dashed p-2.5
           transition-colors text-xs
           ${isDragging ? 'border-blue-500 bg-blue-500/5 text-blue-400' : 'border-zinc-800 text-zinc-600'}
         `}
@@ -132,9 +143,12 @@ export default function GraphicsSidebar({
       </div>
 
       {/* Graphics list */}
-      <div className="flex-1 overflow-auto p-3 space-y-2">
+      <div className={`flex-1 space-y-2 overflow-auto ${embedded ? 'p-2' : 'p-3'}`}>
         {graphics.map((g) => (
-          <div key={g.id} className="rounded-lg border border-zinc-800 bg-zinc-900 p-2.5">
+          <div
+            key={g.id}
+            className={`rounded-lg border border-zinc-800 bg-zinc-900 ${embedded ? 'p-2' : 'p-2.5'}`}
+          >
             <div
               role="button"
               tabIndex={0}

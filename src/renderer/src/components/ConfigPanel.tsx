@@ -11,6 +11,42 @@ type SavePresetResult =
   | { canceled: false; filePath: string }
   | { canceled: false; error: string }
 
+function CaptionStylePreview({ config }: { config: PipelineConfig }): React.JSX.Element {
+  const outline = Math.max(0, config.captionBorderWidth)
+  const fs = Math.min(Math.max(10, config.captionFontSize * 0.32), 26)
+  const isCenter = config.captionPosition === 'center'
+  return (
+    <div className="mt-4">
+      <p className="mb-1.5 text-[10px] text-zinc-600">Caption preview (approximate; export uses FFmpeg)</p>
+      <div className="relative aspect-video w-full max-w-[280px] overflow-hidden rounded-md border border-zinc-700 bg-black">
+        <div
+          className={`absolute inset-x-0 flex justify-center px-2 ${
+            isCenter ? 'top-1/2 -translate-y-1/2' : 'bottom-3'
+          }`}
+        >
+          <span
+            className="inline-block text-center leading-tight"
+            style={{
+              fontSize: fs,
+              color: config.captionFontColor,
+              fontWeight: config.captionBold ? 700 : 400,
+              textShadow:
+                outline > 0
+                  ? `${outline}px 0 0 #000, -${outline}px 0 0 #000, 0 ${outline}px 0 #000, 0 -${outline}px 0 #000`
+                  : undefined,
+              backgroundColor: config.captionBox ? 'rgba(0,0,0,0.55)' : undefined,
+              padding: config.captionBox ? '4px 10px' : undefined,
+              borderRadius: config.captionBox ? 8 : undefined,
+            }}
+          >
+            Sample caption text
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 type ConfigPanelProps = {
   config: PipelineConfig
   onChange: (config: PipelineConfig) => void
@@ -167,6 +203,24 @@ const CAPTION_NUM_PARAMS: ParamDef[] = [
     tooltip: 'Duration of slide-in motion when graphic motion is enabled.',
     min: 0,
     max: 3,
+    step: 0.05,
+    unit: 's',
+  },
+  {
+    key: 'graphicFadeInSec',
+    label: 'Gfx fade in',
+    tooltip: 'Alpha fade-in when each graphic appears on the export timeline (0 = off).',
+    min: 0,
+    max: 5,
+    step: 0.05,
+    unit: 's',
+  },
+  {
+    key: 'graphicFadeOutSec',
+    label: 'Gfx fade out',
+    tooltip: 'Alpha fade-out before each graphic ends on the export timeline (0 = off).',
+    min: 0,
+    max: 5,
     step: 0.05,
     unit: 's',
   },
@@ -461,16 +515,6 @@ export default function ConfigPanel({
           <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
             <input
               type="checkbox"
-              checked={config.removeFillerWords}
-              onChange={(e) => update('removeFillerWords', e.target.checked)}
-              disabled={disabled}
-              className="rounded border-zinc-600"
-            />
-            Strip filler words (captions only)
-          </label>
-          <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
-            <input
-              type="checkbox"
               checked={config.faceZoomEnabled}
               onChange={(e) => update('faceZoomEnabled', e.target.checked)}
               disabled={disabled}
@@ -479,6 +523,8 @@ export default function ConfigPanel({
             Face zoom pulses
           </label>
         </div>
+
+        <CaptionStylePreview config={config} />
 
         <div className="grid grid-cols-3 gap-x-4 gap-y-3">
           {CAPTION_NUM_PARAMS.map((param) => (
