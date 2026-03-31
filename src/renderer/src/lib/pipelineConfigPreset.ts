@@ -14,15 +14,19 @@ import type {
   OutputAspectRatio,
   PipelineConfig,
 } from '../hooks/useProcessPipeline'
+import type { SfxSlot } from '../components/SfxPoolPanel'
+import { cloneDefaultSfxSlots, parseSfxSlotsFromPreset } from '../components/SfxPoolPanel'
 
-/** Bump when the preset file shape or merge rules change incompatibly. */
-export const SPLITTY_PRESET_VERSION = 1 as const
+/** Current preset file version (includes optional `sfxSlots`). */
+export const SPLITTY_PRESET_VERSION = 2 as const
+/** Older exports without `sfxSlots` still parse. */
+export const SPLITTY_PRESET_VERSION_LEGACY = 1 as const
 
-export type SplittyPresetFileV1 = {
+export type SplittyPresetFileV2 = {
   splittyPresetVersion: typeof SPLITTY_PRESET_VERSION
-  /** App version label for humans only (optional). */
   app?: string
   pipelineConfig: Record<string, unknown>
+  sfxSlots?: unknown
 }
 
 export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
@@ -33,7 +37,6 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   minKeepMs: 150,
   attentionLengthMs: 3000,
   maxWords: 3,
-  graphicDisplaySec: 2,
   graphicWidthPercent: 85,
   captionFontSize: 28,
   captionFontColor: '#FFFFFF',
@@ -82,8 +85,20 @@ function pickGraphicPosition(raw: unknown): GraphicPosition {
     : 'center'
 }
 
+const GRAPHIC_MOTIONS: GraphicMotion[] = [
+  'none',
+  'slide_in',
+  'slide_right',
+  'slide_left',
+  'slide_up',
+  'slide_down',
+  'scale_in',
+]
+
 function pickGraphicMotion(raw: unknown): GraphicMotion {
-  return raw === 'slide_in' ? 'slide_in' : 'none'
+  return typeof raw === 'string' && (GRAPHIC_MOTIONS as string[]).includes(raw)
+    ? (raw as GraphicMotion)
+    : 'none'
 }
 
 function pickHexColor(raw: unknown, fallback: string): string {
@@ -150,13 +165,6 @@ export function mergePipelineConfigFromUnknown(
       1,
       20,
     ),
-    graphicDisplaySec: clamp(
-      typeof g('graphicDisplaySec') === 'number'
-        ? (g('graphicDisplaySec') as number)
-        : defaults.graphicDisplaySec,
-      0.5,
-      30,
-    ),
     graphicWidthPercent: clamp(
       typeof g('graphicWidthPercent') === 'number'
         ? (g('graphicWidthPercent') as number)
@@ -210,14 +218,14 @@ export function mergePipelineConfigFromUnknown(
       typeof g('sfxCaptionEveryN') === 'number'
         ? (g('sfxCaptionEveryN') as number)
         : defaults.sfxCaptionEveryN,
-      1,
+      0,
       20,
     ),
     sfxGraphicEveryN: clamp(
       typeof g('sfxGraphicEveryN') === 'number'
         ? (g('sfxGraphicEveryN') as number)
         : defaults.sfxGraphicEveryN,
-      1,
+      0,
       20,
     ),
     graphicFadeInSec: clamp(
@@ -268,19 +276,33 @@ export function mergePipelineConfigFromUnknown(
   }
 }
 
-export function serializePipelinePreset(config: PipelineConfig, appVersion?: string): string {
-  const doc: SplittyPresetFileV1 = {
+export function serializeSplittyPreset(
+  config: PipelineConfig,
+  sfxSlots: SfxSlot[],
+  appVersion?: string,
+): string {
+  const doc: SplittyPresetFileV2 = {
     splittyPresetVersion: SPLITTY_PRESET_VERSION,
     ...(appVersion ? { app: appVersion } : {}),
     pipelineConfig: { ...config },
+    sfxSlots,
   }
   return `${JSON.stringify(doc, null, 2)}\n`
 }
 
+/** @deprecated Use `serializeSplittyPreset` with SFX slots for full export. */
+export function serializePipelinePreset(config: PipelineConfig, appVersion?: string): string {
+  return serializeSplittyPreset(config, cloneDefaultSfxSlots(), appVersion)
+}
+
+export type ParsePipelinePresetResult =
+  | { ok: true; config: PipelineConfig; sfxSlots: SfxSlot[] | null }
+  | { ok: false; error: string }
+
 export function parsePipelinePresetJson(
   jsonText: string,
   defaults: PipelineConfig = DEFAULT_PIPELINE_CONFIG,
-): { ok: true; config: PipelineConfig } | { ok: false; error: string } {
+): ParsePipelinePresetResult {
   let parsed: unknown
   try {
     parsed = JSON.parse(jsonText) as unknown
@@ -291,12 +313,24 @@ export function parsePipelinePresetJson(
     return { ok: false, error: 'Preset root must be an object.' }
   }
   const root = parsed as Record<string, unknown>
-  if (root.splittyPresetVersion === SPLITTY_PRESET_VERSION) {
+  const ver = root.splittyPresetVersion
+
+  if (ver === SPLITTY_PRESET_VERSION || ver === SPLITTY_PRESET_VERSION_LEGACY) {
     const pc = root.pipelineConfig
     if (typeof pc !== 'object' || pc === null) {
       return { ok: false, error: 'Missing pipelineConfig object.' }
     }
-    return { ok: true, config: mergePipelineConfigFromUnknown(pc as Record<string, unknown>, defaults) }
+    const config = mergePipelineConfigFromUnknown(pc as Record<string, unknown>, defaults)
+    let sfxSlots: SfxSlot[] | null = null
+    if (ver === SPLITTY_PRESET_VERSION) {
+      if (!Object.prototype.hasOwnProperty.call(root, 'sfxSlots')) {
+        sfxSlots = null
+      } else {
+        const p = parseSfxSlotsFromPreset(root.sfxSlots)
+        sfxSlots = p ?? cloneDefaultSfxSlots()
+      }
+    }
+    return { ok: true, config, sfxSlots }
   }
   // Legacy: a flat `PipelineConfig`-shaped object
   if (
@@ -304,10 +338,10 @@ export function parsePipelinePresetJson(
     typeof root.maxWords === 'number' ||
     typeof root.captionFontSize === 'number'
   ) {
-    return { ok: true, config: mergePipelineConfigFromUnknown(root, defaults) }
+    return { ok: true, config: mergePipelineConfigFromUnknown(root, defaults), sfxSlots: null }
   }
   return {
     ok: false,
-    error: `Missing splittyPresetVersion: ${SPLITTY_PRESET_VERSION} (or a flat pipeline config object).`,
+    error: `Missing splittyPresetVersion: ${SPLITTY_PRESET_VERSION} or ${SPLITTY_PRESET_VERSION_LEGACY} (or a flat pipeline config object).`,
   }
 }

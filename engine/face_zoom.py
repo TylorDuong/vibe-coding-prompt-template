@@ -80,10 +80,8 @@ def sample_face_center_normalized(video_path: str, max_samples: int = 16) -> tup
 def graphic_overlay_intervals_output(
     matches: list[dict[str, Any]],
     keep_segments: list[dict[str, float]],
-    graphic_display_sec: float,
 ) -> list[tuple[float, float]]:
-    """Output-timeline intervals [start,end) where a graphic is shown."""
-    cap_sec = max(0.2, min(float(graphic_display_sec), 60.0))
+    """Output-timeline intervals [start,end) where a graphic is shown (full match span)."""
     out: list[tuple[float, float]] = []
     for m in matches:
         fp = m.get("graphic", "")
@@ -91,8 +89,8 @@ def graphic_overlay_intervals_output(
             continue
         g_start = float(m["matched_segment_start"])
         g_end_src = float(m.get("matched_segment_end", g_start + 3.0))
-        span = min(max(0.0, g_end_src - g_start), cap_sec)
-        g_end = g_start + span
+        span = max(0.0, g_end_src - g_start)
+        g_end = g_start + (span if span >= 0.05 else 0.2)
         t0 = _source_time_to_output(g_start, keep_segments)
         t1 = _source_time_to_output(g_end, keep_segments)
         if t1 > t0:
@@ -163,10 +161,18 @@ def build_zoom_active_expression(
     """FFmpeg expr fragment: 1 inside any window, else 0.
 
     Use time_var='t' for drawtext/overlay on the cut timeline; use 'in_time' inside zoompan.
+
+    Implemented as a flat sum of between() terms + gt(sum,0) instead of deeply nested if().
+    Long presets (large pulse_sec × long output) used to build 40+ nested if() calls and
+    could break FFmpeg's expression parser or zoompan, which surfaced as preview encode failure.
     """
     if not windows:
         return "0"
-    expr = "0"
-    for a, b in reversed(windows[:48]):
-        expr = f"if(between({time_var}\\,{a:.3f}\\,{b:.3f})\\,1\\,{expr})"
-    return expr
+    max_windows = 96
+    parts = [
+        f"between({time_var}\\,{a:.3f}\\,{b:.3f})" for a, b in windows[:max_windows]
+    ]
+    if len(parts) == 1:
+        return parts[0]
+    summed = "+".join(parts)
+    return f"gt({summed}\\,0)"

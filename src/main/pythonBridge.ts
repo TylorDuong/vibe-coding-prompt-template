@@ -1,4 +1,4 @@
-import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
+import { execSync, spawn, spawnSync, ChildProcessWithoutNullStreams } from 'child_process'
 import { join } from 'path'
 import { app } from 'electron'
 
@@ -7,6 +7,7 @@ type PendingRequest = {
   reject: (reason: unknown) => void
   timeoutId: ReturnType<typeof setTimeout>
   onExportProgress?: (payload: { percent: number }) => void
+  onPreviewProgress?: (payload: { percent: number }) => void
 }
 
 let pythonProcess: ChildProcessWithoutNullStreams | null = null
@@ -28,6 +29,8 @@ export type SendToEngineOptions = {
   timeoutMs?: number
   /** Emitted while `exportFull` runs (parsed from engine stdout). */
   onExportProgress?: (payload: { percent: number }) => void
+  /** Emitted while `encodePreview` runs. */
+  onPreviewProgress?: (payload: { percent: number }) => void
 }
 
 function getPythonPath(): string {
@@ -80,6 +83,26 @@ export function startPythonEngine(): void {
           }
           continue
         }
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          '_previewProgress' in parsed
+        ) {
+          const wrap = parsed as { _previewProgress?: unknown }
+          const inner = wrap._previewProgress
+          if (
+            inner !== null &&
+            typeof inner === 'object' &&
+            'percent' in inner &&
+            typeof (inner as { percent: unknown }).percent === 'number'
+          ) {
+            const head = pendingQueue[0]
+            head?.onPreviewProgress?.({
+              percent: Math.round((inner as { percent: number }).percent),
+            })
+          }
+          continue
+        }
         const pending = pendingQueue.shift()
         if (pending) {
           clearTimeout(pending.timeoutId)
@@ -118,11 +141,47 @@ export function startPythonEngine(): void {
   restartAttempts = 0
 }
 
+/** Kill child PIDs first so FFmpeg grandchildren exit (especially on Windows). */
+function killUnixProcessTree(pid: number): void {
+  try {
+    const out = execSync(`pgrep -P ${pid}`, { encoding: 'utf8' }).trim()
+    for (const line of out.split('\n')) {
+      const cpid = parseInt(line, 10)
+      if (Number.isFinite(cpid) && cpid > 0) {
+        killUnixProcessTree(cpid)
+      }
+    }
+  } catch {
+    /* no children or pgrep missing */
+  }
+  try {
+    process.kill(pid, 'SIGKILL')
+  } catch {
+    /* already exited */
+  }
+}
+
 export function stopPythonEngine(): void {
   restartAttempts = MAX_RESTART_ATTEMPTS
-  if (pythonProcess) {
-    pythonProcess.kill()
-    pythonProcess = null
+  if (!pythonProcess) {
+    return
+  }
+  const proc = pythonProcess
+  pythonProcess = null
+  const pid = proc.pid
+  if (pid != null && pid > 0) {
+    if (process.platform === 'win32') {
+      try {
+        spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        })
+      } catch {
+        /* process may already be gone */
+      }
+    } else {
+      killUnixProcessTree(pid)
+    }
   }
 }
 
@@ -160,6 +219,9 @@ export function sendToEngine(
       timeoutId,
       ...(options?.onExportProgress !== undefined
         ? { onExportProgress: options.onExportProgress }
+        : {}),
+      ...(options?.onPreviewProgress !== undefined
+        ? { onPreviewProgress: options.onPreviewProgress }
         : {}),
     })
 

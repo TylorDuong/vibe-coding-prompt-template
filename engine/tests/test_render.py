@@ -10,13 +10,20 @@ from engine.render import (
     chunk_words,
     build_caption_chunks,
     collect_sfx_plays,
+    normalize_graphic_motion,
     render_full,
     source_time_to_output,
     remap_interval,
+    wrap_caption_line_to_width,
+    wrap_caption_chunks_for_frame,
+    _append_caption_drawtext_clauses,
+    _caption_y_expr,
     _overlay_dims_uniform,
     _center_crop_filter,
     _atempo_segments,
     _chain_audio_atempo,
+    _stderr_time_sec,
+    _ffmpeg_stderr_marks_mux_done,
 )
 
 
@@ -102,6 +109,22 @@ def test_collect_sfx_caption_every_n(tmp_path) -> None:
     assert len(plays) == 2
 
 
+def test_collect_sfx_caption_every_n_zero_skips(tmp_path) -> None:
+    wav = tmp_path / "x.wav"
+    wav.write_bytes(b"fake")
+    events = [
+        {"type": "sfx", "start": 0.0, "trigger": "caption_entry"},
+        {"type": "sfx", "start": 0.5, "trigger": "graphic_entry"},
+    ]
+    assigns = [
+        {"trigger": "caption_entry", "filePath": str(wav), "volume": 1.0},
+        {"trigger": "graphic_entry", "filePath": str(wav), "volume": 1.0},
+    ]
+    keep = [{"start": 0.0, "end": 10.0}]
+    assert len(collect_sfx_plays(events, {}, assigns, keep, caption_every_n=0, graphic_every_n=1)) == 1
+    assert len(collect_sfx_plays(events, {}, assigns, keep, caption_every_n=1, graphic_every_n=0)) == 1
+
+
 @pytest.fixture(scope="module")
 def test_video_with_audio() -> str:
     tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
@@ -148,7 +171,6 @@ def test_render_full_captions_only(test_video_with_audio: str) -> None:
             keep_segments=[{"start": 0.0, "end": 3.0}],
             events=[],
             max_words=3,
-            graphic_display_sec=2.0,
         )
         assert result.ok is True, result.error
         assert result.data is not None
@@ -349,3 +371,119 @@ def test_render_full_graphic_fade_in_filter(test_video_with_audio: str, tmp_path
     finally:
         if os.path.exists(out.name):
             os.unlink(out.name)
+
+
+def test_stderr_time_sec_out_time_ms() -> None:
+    assert abs((_stderr_time_sec("frame=1 out_time_ms=5000") or 0) - 5.0) < 0.001
+
+
+def test_stderr_time_sec_integer_microseconds() -> None:
+    assert abs((_stderr_time_sec("progress out_time=2500000 dup=0 drop=0") or 0) - 2.5) < 0.001
+
+
+def test_stderr_time_sec_prefers_hhmmss_time_field() -> None:
+    t = _stderr_time_sec("frame=1 time=00:00:07.50 speed=1.2x")
+    assert t is not None and abs(t - 7.5) < 0.01
+
+
+def test_ffmpeg_stderr_mux_done_lsize_case_insensitive() -> None:
+    assert _ffmpeg_stderr_marks_mux_done("lsize=   12345KiB time=00:00:01.00 bitrate=1")
+    assert _ffmpeg_stderr_marks_mux_done("Lsize=   12345KiB time=00:00:01.00 bitrate=1")
+    assert _ffmpeg_stderr_marks_mux_done("video:123kB audio:45kB subtitle:0kB muxing overhead: 0.1%")
+
+
+def test_wrap_caption_line_fallback_adds_newlines() -> None:
+    long = "word " * 50
+    out = wrap_caption_line_to_width(long, max_width_px=80, font_size=24, bold=False)
+    assert "\n" in out
+
+
+def test_normalize_graphic_motion_slide_right_alias() -> None:
+    assert normalize_graphic_motion("slide_right", "none") == "slide_in"
+    assert normalize_graphic_motion("slide_up", "none") == "slide_up"
+    assert normalize_graphic_motion("bogus", "slide_left") == "slide_left"
+
+
+def test_caption_y_expr_bottom_uses_text_h_not_th() -> None:
+    y = _caption_y_expr("bottom", 48, border_w=2)
+    assert "h-text_h-" in y
+    assert "h-th-" not in y
+
+
+def test_wrap_caption_chunks_matches_shrunk_draw_width() -> None:
+    long = "word " * 80
+    margin = 48
+    inner = 1000 - 2 * margin
+    w_shrunk = max(80, int(inner * 0.88))
+    expected = wrap_caption_line_to_width(long, w_shrunk, 24, False)
+    out = wrap_caption_chunks_for_frame(
+        [{"start": 0.0, "end": 1.0, "text": long}],
+        frame_width=1000,
+        cap_margin=margin,
+        caption_font_size=24,
+        caption_bold=False,
+    )
+    assert out[0]["text"] == expected
+
+
+def test_append_multiline_caption_emits_one_drawtext_per_line() -> None:
+    clauses: list[str] = []
+    _append_caption_drawtext_clauses(
+        clauses,
+        {"start": 0.0, "end": 1.0, "text": "line one\nline two"},
+        font_prefix="",
+        caption_font_size=24,
+        font_color="white",
+        border_color="black",
+        caption_border_width=2,
+        line_spacing=6,
+        caption_position="bottom",
+        cap_margin=48,
+        caption_box=False,
+        caption_fade_in_sec=0.0,
+        caption_fade_out_sec=0.0,
+    )
+    assert len(clauses) == 2
+    assert "line one" in clauses[0] and "line two" in clauses[1]
+    assert "line_spacing=" not in clauses[0]
+
+
+def test_append_caption_skips_blank_only_lines() -> None:
+    clauses: list[str] = []
+    _append_caption_drawtext_clauses(
+        clauses,
+        {"start": 0.0, "end": 1.0, "text": "only\n\n"},
+        font_prefix="",
+        caption_font_size=24,
+        font_color="white",
+        border_color="black",
+        caption_border_width=2,
+        line_spacing=6,
+        caption_position="bottom",
+        cap_margin=48,
+        caption_box=False,
+        caption_fade_in_sec=0.0,
+        caption_fade_out_sec=0.0,
+    )
+    assert len(clauses) == 1
+    assert "only" in clauses[0]
+
+
+def test_append_caption_whitespace_only_emits_nothing() -> None:
+    clauses: list[str] = []
+    _append_caption_drawtext_clauses(
+        clauses,
+        {"start": 0.0, "end": 1.0, "text": "  \n  \t  "},
+        font_prefix="",
+        caption_font_size=24,
+        font_color="white",
+        border_color="black",
+        caption_border_width=2,
+        line_spacing=6,
+        caption_position="bottom",
+        cap_margin=48,
+        caption_box=False,
+        caption_fade_in_sec=0.0,
+        caption_fade_out_sec=0.0,
+    )
+    assert len(clauses) == 0

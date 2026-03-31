@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import type { GraphicItem } from '../components/GraphicsSidebar'
+import type { GraphicItem } from '../lib/graphicsTypes'
 import type { KeepSegment } from '../lib/timelineRemap'
 
 export type PipelineStage =
@@ -37,7 +37,14 @@ export type GraphicPosition =
   | 'bottom_right'
   | 'bottom_left'
 
-export type GraphicMotion = 'none' | 'slide_in'
+export type GraphicMotion =
+  | 'none'
+  | 'slide_in'
+  | 'slide_right'
+  | 'slide_left'
+  | 'slide_up'
+  | 'slide_down'
+  | 'scale_in'
 
 /** Export-only: center-crop to this aspect; original keeps source dimensions. */
 export type OutputAspectRatio = 'original' | '16:9' | '9:16' | '1:1' | '4:5'
@@ -50,8 +57,6 @@ export type PipelineConfig = {
   minKeepMs: number
   attentionLengthMs: number
   maxWords: number
-  /** Max seconds each graphic stays on screen during full export */
-  graphicDisplaySec: number
   /** Max graphic width as % of video width (centered) */
   graphicWidthPercent: number
   captionFontSize: number
@@ -84,6 +89,15 @@ export type PipelineConfig = {
   videoSpeed: number
 }
 
+export type PipelinePreviewMeta = {
+  outputDurationSec: number
+  captionChunks: Array<{ text: string; start: number; end: number }>
+  graphicIntervalsOutput: Array<{ start: number; end: number }>
+  faceCenter: { x: number; y: number } | null
+  faceZoomWindows: Array<{ start: number; end: number }>
+  faceZoomStrengthPreview: number
+}
+
 export type PipelineResult = {
   video: Record<string, unknown> | null
   segments: Record<string, unknown>[]
@@ -94,6 +108,7 @@ export type PipelineResult = {
   silenceThresholdMs: number
   /** Kept spans on the source timeline (for mapping to export time) */
   keepSegments?: KeepSegment[]
+  preview?: PipelinePreviewMeta
 }
 
 const STAGE_LABELS: Record<PipelineStage, string> = {
@@ -174,13 +189,25 @@ export function useProcessPipeline() {
         updateStage('transcribing')
         const transcribeResult = (await window.electron.invoke('engine:processVideo', {
           videoPath,
-          graphics: graphics.map((g) => ({ filePath: g.filePath, tag: g.tag })),
+          graphics: graphics.map((g) => ({
+            filePath: g.filePath,
+            tag: g.tag,
+            kind: g.kind ?? 'image',
+          })),
           silenceThresholdDb: config.silenceThresholdDb,
           minSilenceDurationMs: config.minSilenceDurationMs,
           paddingMs: config.paddingMs,
           mergeGapMs: config.mergeGapMs,
           minKeepMs: config.minKeepMs,
           attentionLengthMs: config.attentionLengthMs,
+          maxWords: config.maxWords,
+          captionFontSize: config.captionFontSize,
+          captionBold: config.captionBold,
+          outputAspectRatio: config.outputAspectRatio,
+          faceZoomEnabled: config.faceZoomEnabled,
+          faceZoomIntervalSec: config.faceZoomIntervalSec,
+          faceZoomPulseSec: config.faceZoomPulseSec,
+          faceZoomStrength: config.faceZoomStrength,
           silences,
           totalDuration: videoDuration,
         })) as StageResult

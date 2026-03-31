@@ -27,7 +27,7 @@ def build_events(
       - caption: a transcript segment to display
       - graphic: a matched graphic to overlay
       - sfx: sound cue (trigger only; user must assign audio in the SFX pool to hear it)
-      - silence_cut: a removed silence interval
+      - silence_cut: a removed silence interval (no automatic SFX on cuts)
     """
     events: list[dict[str, Any]] = []
 
@@ -69,11 +69,6 @@ def build_events(
             "type": "silence_cut",
             "start": s["start"],
             "end": s["end"],
-        })
-        events.append({
-            "type": "sfx",
-            "start": s["end"],
-            "trigger": "silence_cut",
         })
 
     events.sort(key=lambda e: e["start"])

@@ -1,6 +1,9 @@
-import { app, BrowserWindow, protocol, net } from 'electron'
-import { join } from 'path'
-import { pathToFileURL } from 'url'
+import { app, BrowserWindow, protocol } from 'electron'
+import { createReadStream, existsSync, statSync } from 'fs'
+import { extname, join } from 'path'
+import { Readable } from 'node:stream'
+import { startPythonEngine, stopPythonEngine } from './pythonBridge'
+import { registerIpcHandlers } from './ipcHandlers'
 
 /** Resolve renderer `local-file://…` requests to a filesystem path (Windows-safe). */
 function localFileRequestToFsPath(requestUrl: string): string {
@@ -25,10 +28,149 @@ function localFileRequestToFsPath(requestUrl: string): string {
   } catch {
     /* fall through */
   }
-  return decodeURIComponent(requestUrl.replace(/^local-file:\/\/?/i, ''))
+  let fb = decodeURIComponent(
+    requestUrl.replace(/^local-file:\/\/?/i, '').replace(/\+/g, ' '),
+  )
+  if (process.platform === 'win32') {
+    if (fb.startsWith('/') && /^\/[A-Za-z]:/.test(fb)) {
+      fb = fb.slice(1)
+    }
+    fb = fb.replace(/\//g, '\\')
+  }
+  return fb
 }
-import { startPythonEngine, stopPythonEngine } from './pythonBridge'
-import { registerIpcHandlers } from './ipcHandlers'
+
+function mimeForPath(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case '.mp4':
+      return 'video/mp4'
+    case '.webm':
+      return 'video/webm'
+    case '.mov':
+      return 'video/quicktime'
+    case '.mkv':
+      return 'video/x-matroska'
+    case '.png':
+      return 'image/png'
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg'
+    case '.gif':
+      return 'image/gif'
+    case '.webp':
+      return 'image/webp'
+    case '.svg':
+      return 'image/svg+xml'
+    case '.bmp':
+      return 'image/bmp'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
+/** Parse first `bytes=` range; used so `<video>` gets 206 + Content-Range (required for many encodes). */
+function parseBytesRange(
+  rangeHeader: string | null,
+  size: number,
+): { start: number; end: number } | 'unsatisfiable' | null {
+  if (!rangeHeader || !rangeHeader.startsWith('bytes=')) return null
+  const first = rangeHeader.slice('bytes='.length).split(',')[0]?.trim()
+  if (!first) return null
+
+  if (first.startsWith('-')) {
+    const suffix = parseInt(first.slice(1), 10)
+    if (Number.isNaN(suffix) || suffix <= 0) return null
+    if (suffix >= size) {
+      return { start: 0, end: size - 1 }
+    }
+    return { start: Math.max(0, size - suffix), end: size - 1 }
+  }
+
+  const dash = first.indexOf('-')
+  if (dash < 0) return null
+  const startStr = first.slice(0, dash)
+  const endStr = first.slice(dash + 1)
+  const start = startStr === '' ? 0 : parseInt(startStr, 10)
+  let end = endStr === '' ? size - 1 : parseInt(endStr, 10)
+  if (Number.isNaN(start) || Number.isNaN(end)) return null
+  if (start >= size) return 'unsatisfiable'
+  if (end >= size) end = size - 1
+  if (start > end) return 'unsatisfiable'
+  return { start, end }
+}
+
+function localFileResponse(request: Request): Response {
+  const filePath = localFileRequestToFsPath(request.url)
+  if (!existsSync(filePath)) {
+    return new Response(null, { status: 404 })
+  }
+  let st: ReturnType<typeof statSync>
+  try {
+    st = statSync(filePath)
+  } catch {
+    return new Response(null, { status: 404 })
+  }
+  if (!st.isFile()) {
+    return new Response(null, { status: 404 })
+  }
+
+  const size = st.size
+  const mime = mimeForPath(filePath)
+  const baseHeaders: Record<string, string> = {
+    'Content-Type': mime,
+    'Accept-Ranges': 'bytes',
+  }
+
+  if (request.method === 'HEAD') {
+    return new Response(null, {
+      status: 200,
+      headers: {
+        ...baseHeaders,
+        'Content-Length': String(size),
+      },
+    })
+  }
+
+  if (request.method !== 'GET') {
+    return new Response(null, { status: 405 })
+  }
+
+  const parsed = parseBytesRange(request.headers.get('range'), size)
+
+  if (parsed === 'unsatisfiable') {
+    return new Response(null, {
+      status: 416,
+      headers: {
+        ...baseHeaders,
+        'Content-Range': `bytes */${size}`,
+      },
+    })
+  }
+
+  if (parsed != null) {
+    const { start, end } = parsed
+    const stream = createReadStream(filePath, { start, end })
+    const body = Readable.toWeb(stream)
+    return new Response(body, {
+      status: 206,
+      headers: {
+        ...baseHeaders,
+        'Content-Length': String(end - start + 1),
+        'Content-Range': `bytes ${start}-${end}/${size}`,
+      },
+    })
+  }
+
+  const stream = createReadStream(filePath)
+  const body = Readable.toWeb(stream) as ReadableStream<Uint8Array>
+  return new Response(body, {
+    status: 200,
+    headers: {
+      ...baseHeaders,
+      'Content-Length': String(size),
+    },
+  })
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -39,8 +181,8 @@ function createWindow(): void {
     backgroundColor: '#09090b',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
-    }
+      sandbox: false,
+    },
   })
 
   mainWindow.on('ready-to-show', () => {
@@ -62,15 +204,13 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       bypassCSP: true,
+      stream: true,
     },
   },
 ])
 
 app.whenReady().then(() => {
-  protocol.handle('local-file', (request) => {
-    const filePath = localFileRequestToFsPath(request.url)
-    return net.fetch(pathToFileURL(filePath).href)
-  })
+  protocol.handle('local-file', (request) => localFileResponse(request))
 
   startPythonEngine()
   registerIpcHandlers()
@@ -88,5 +228,9 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  stopPythonEngine()
+})
+
+app.on('will-quit', () => {
   stopPythonEngine()
 })

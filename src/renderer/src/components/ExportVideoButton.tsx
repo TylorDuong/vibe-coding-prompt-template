@@ -87,7 +87,6 @@ export default function ExportVideoButton({
         mergeGapMs: config.mergeGapMs,
         minKeepMs: config.minKeepMs,
         attentionLengthMs: config.attentionLengthMs,
-        graphicDisplaySec: config.graphicDisplaySec,
         graphicWidthPercent: config.graphicWidthPercent,
         captionFontSize: config.captionFontSize,
         captionFontColor: config.captionFontColor,
