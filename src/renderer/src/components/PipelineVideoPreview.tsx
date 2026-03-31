@@ -11,18 +11,25 @@ import type { EncodedPreviewState } from '../hooks/useEncodedPreview'
 import type { PipelineConfig, PipelinePreviewMeta } from '../hooks/useProcessPipeline'
 import type { KeepSegment } from '../lib/timelineRemap'
 import {
+  captionOutlineShadowCqw,
+  captionPreviewFontSizeCss,
+} from '../lib/captionPreviewStyle'
+import {
   activeGraphicMatchAtOutputTime,
   EXPORT_SCRUB_TIME_EPS,
+  graphicMatchRemappedOut,
   isInsideKeepSegments,
   outputTimeToEncodedFileSeconds,
   sourceTimeToOutput,
 } from '../lib/timelineRemap'
+import { absPathToLocalFileUrl } from '../lib/localFileUrl'
 
 type MatchRow = {
   graphic: string
   matched_segment_start: number
   matched_segment_end: number
   similarity: number
+  isVideo?: boolean
 }
 
 const ASPECT_WH: Record<
@@ -82,8 +89,6 @@ function graphicPositionStyle(pos: PipelineConfig['graphicPosition']): CSSProper
   }
 }
 
-const REF_EXPORT_WIDTH = 720
-
 type PipelineVideoPreviewProps = {
   videoPath: string
   scrubTime: number
@@ -123,6 +128,7 @@ export default function PipelineVideoPreview({
   const [encodedSeekSettled, setEncodedSeekSettled] = useState(true)
   const encodedTargetTRef = useRef(0)
   const encodedFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const graphicOverlayVideoRef = useRef<HTMLVideoElement | null>(null)
 
   const { arW, arH } = useMemo(() => {
     if (config.outputAspectRatio === 'original') {
@@ -143,12 +149,7 @@ export default function PipelineVideoPreview({
 
   const cap =
     previewMeta != null ? activeCaptionChunk(tOut, previewMeta.captionChunks) : null
-  const gfx = activeGraphicMatchAtOutputTime(
-    tOut,
-    matches ?? [],
-    keepSegments,
-    config.graphicDisplaySec,
-  )
+  const gfx = activeGraphicMatchAtOutputTime(tOut, matches ?? [], keepSegments)
   const zoomOn =
     inKept &&
     Boolean(config.faceZoomEnabled) &&
@@ -161,13 +162,10 @@ export default function PipelineVideoPreview({
 
   const wPct = Math.max(10, Math.min(100, config.graphicWidthPercent))
 
-  const captionCqw = (config.captionFontSize / REF_EXPORT_WIDTH) * 100
-  const outlineCqw = (config.captionBorderWidth / REF_EXPORT_WIDTH) * 100
-  const c = config.captionOutlineColor
-  const shadow =
-    config.captionBorderWidth > 0
-      ? `${outlineCqw}cqw 0 0 ${c}, -${outlineCqw}cqw 0 0 ${c}, 0 ${outlineCqw}cqw 0 ${c}, 0 -${outlineCqw}cqw 0 ${c}`
-      : undefined
+  const shadow = captionOutlineShadowCqw(
+    config.captionBorderWidth,
+    config.captionOutlineColor,
+  )
   const isCenter = config.captionPosition === 'center'
 
   const encodeReady =
@@ -176,6 +174,23 @@ export default function PipelineVideoPreview({
     encodedPreviewPath.length > 0
 
   const preferEncoded = encodeReady && !encodedLoadError
+
+  useEffect(() => {
+    const v = graphicOverlayVideoRef.current
+    if (!v || gfx == null || !gfx.isVideo) return
+    const r = graphicMatchRemappedOut(gfx, keepSegments)
+    if (r == null) return
+    const elapsed = Math.max(0, tOut - r.start)
+    const dur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0
+    if (dur > 0 && elapsed >= dur - 0.04) {
+      v.currentTime = Math.max(0, dur - 0.04)
+    } else if (dur > 0) {
+      v.currentTime = Math.min(elapsed, dur - 1e-3)
+    } else {
+      v.currentTime = elapsed
+    }
+    v.pause()
+  }, [gfx, tOut, keepSegments])
 
   useEffect(() => {
     setEncodedLoadError(false)
@@ -299,7 +314,7 @@ export default function PipelineVideoPreview({
           <video
             key={encodedPreviewPath}
             ref={videoRef}
-            src={`local-file://${encodeURIComponent(encodedPreviewPath)}`}
+            src={absPathToLocalFileUrl(encodedPreviewPath)}
             className={`absolute inset-0 z-0 h-full w-full bg-black object-contain transition-[filter,transform] duration-150 ease-out ${
               !encodedSeekSettled ? 'scale-[1.04] blur-md' : 'blur-0'
             }`}
@@ -322,7 +337,7 @@ export default function PipelineVideoPreview({
             >
               <video
                 ref={videoRef}
-                src={`local-file://${encodeURIComponent(videoPath)}`}
+                src={absPathToLocalFileUrl(videoPath)}
                 className="absolute inset-0 h-full w-full object-cover"
                 controls
                 playsInline
@@ -343,19 +358,38 @@ export default function PipelineVideoPreview({
         )}
 
         {showAnyOverlay && gfx != null ? (
-          <img
-            src={`local-file://${encodeURIComponent(gfx.graphic)}`}
-            alt=""
-            className={`pointer-events-none absolute object-contain ${
-              showEncodedHtmlOverlays ? 'z-[15]' : 'z-[5]'
-            }`}
-            style={{
-              ...graphicPositionStyle(config.graphicPosition),
-              width: `${wPct}%`,
-              maxWidth: `${wPct}%`,
-              maxHeight: '42cqh',
-            }}
-          />
+          gfx.isVideo ? (
+            <video
+              ref={graphicOverlayVideoRef}
+              src={absPathToLocalFileUrl(gfx.graphic)}
+              className={`pointer-events-none absolute object-contain ${
+                showEncodedHtmlOverlays ? 'z-[15]' : 'z-[5]'
+              }`}
+              style={{
+                ...graphicPositionStyle(config.graphicPosition),
+                width: `${wPct}%`,
+                maxWidth: `${wPct}%`,
+                maxHeight: '42cqh',
+              }}
+              muted
+              playsInline
+              preload="auto"
+            />
+          ) : (
+            <img
+              src={absPathToLocalFileUrl(gfx.graphic)}
+              alt=""
+              className={`pointer-events-none absolute object-contain ${
+                showEncodedHtmlOverlays ? 'z-[15]' : 'z-[5]'
+              }`}
+              style={{
+                ...graphicPositionStyle(config.graphicPosition),
+                width: `${wPct}%`,
+                maxWidth: `${wPct}%`,
+                maxHeight: '42cqh',
+              }}
+            />
+          )
         ) : null}
 
         {showAnyOverlay && cap != null ? (
@@ -370,9 +404,9 @@ export default function PipelineVideoPreview({
             }
           >
             <span
-              className="inline-block max-w-[96%] text-center leading-tight drop-shadow-md"
+              className="inline-block max-w-[min(96%,calc(100cqw-4cqw))] text-center leading-tight break-words whitespace-pre-wrap drop-shadow-md"
               style={{
-                fontSize: `clamp(0.5rem, ${captionCqw}cqw, 2.75rem)`,
+                fontSize: captionPreviewFontSizeCss(config.captionFontSize),
                 color: config.captionFontColor,
                 fontWeight: config.captionBold ? 700 : 400,
                 textShadow: shadow,

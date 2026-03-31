@@ -4,6 +4,7 @@ import PipelineVideoPreview from './PipelineVideoPreview'
 import type { EncodedPreviewState } from '../hooks/useEncodedPreview'
 import type { PipelineConfig, PipelinePreviewMeta } from '../hooks/useProcessPipeline'
 import type { KeepSegment } from '../lib/timelineRemap'
+import type { WordTrigger } from '../lib/graphicPlacements'
 import {
   encodedFileDurationSec,
   outputTimeToEncodedFileSeconds,
@@ -54,7 +55,7 @@ type TimelineData = {
   eventCounts?: Record<string, number>
 }
 
-type WordTrigger = { start: number; word: string }
+type PendingWordClick = { start: number; end: number; word: string }
 
 type TimelinePreviewProps = {
   timeline: TimelineData
@@ -62,6 +63,7 @@ type TimelinePreviewProps = {
   attentionLengthMs: number
   selectedGraphicId: string | null
   wordTriggers: Record<string, WordTrigger>
+  pendingPlacementStart: PendingWordClick | null
   onWordAssign: (payload: { start: number; end: number; word: string }) => void
   pipelineConfig: PipelineConfig
   previewMeta?: PipelinePreviewMeta | null
@@ -114,11 +116,29 @@ function CollapsibleSection({
   )
 }
 
-function isWordLinked(wStart: number, wText: string, triggers: Record<string, WordTrigger>): boolean {
-  const t = wText.trim()
-  return Object.values(triggers).some(
-    (tr) => Math.abs(tr.start - wStart) < 0.03 && tr.word === t,
-  )
+const WORD_TIME_EPS = 0.03
+
+function isWordHighlighted(
+  wStart: number,
+  wEnd: number,
+  triggers: Record<string, WordTrigger>,
+  selectedId: string | null,
+  pending: PendingWordClick | null,
+): boolean {
+  for (const pl of Object.values(triggers)) {
+    if (wStart >= pl.start - WORD_TIME_EPS && wEnd <= pl.end + WORD_TIME_EPS) {
+      return true
+    }
+  }
+  if (selectedId && pending) {
+    if (
+      Math.abs(wStart - pending.start) < WORD_TIME_EPS &&
+      Math.abs(wEnd - pending.end) < WORD_TIME_EPS
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
 export default function TimelinePreview({
@@ -127,6 +147,7 @@ export default function TimelinePreview({
   attentionLengthMs,
   selectedGraphicId,
   wordTriggers,
+  pendingPlacementStart,
   onWordAssign,
   pipelineConfig,
   previewMeta = null,
@@ -369,7 +390,14 @@ export default function TimelinePreview({
               <CollapsibleSection title="Transcript" count={timeline.segments.length} defaultOpen>
                 {!selectedGraphicId && (
                   <p className="mb-2 text-[10px] text-amber-500/90">
-                    Select a graphic above, then click a word here to set when it appears.
+                    Select a graphic or clip above, then click start and end words in the transcript.
+                  </p>
+                )}
+                {selectedGraphicId && (
+                  <p className="mb-2 text-[10px] text-zinc-500">
+                    {pendingPlacementStart
+                      ? 'Click the end word (or same word again for a minimal range).'
+                      : 'Click the start word for placement.'}
                   </p>
                 )}
                 <ul className="space-y-2 max-h-[min(320px,40vh)] overflow-auto">
@@ -388,7 +416,13 @@ export default function TimelinePreview({
                             {words.map((w, wi) => {
                               const raw = w.word ?? ''
                               const display = raw.trim() || '·'
-                              const isLinked = isWordLinked(w.start, raw, wordTriggers)
+                              const isLinked = isWordHighlighted(
+                                w.start,
+                                w.end,
+                                wordTriggers,
+                                selectedGraphicId,
+                                pendingPlacementStart,
+                              )
                               return (
                                 <button
                                   key={`${i}-${wi}-${w.start}`}
@@ -396,7 +430,9 @@ export default function TimelinePreview({
                                   disabled={!selectedGraphicId}
                                   title={
                                     selectedGraphicId
-                                      ? 'Place selected graphic at this word'
+                                      ? pendingPlacementStart
+                                        ? 'Set placement end at this word'
+                                        : 'Set placement start at this word'
                                       : 'Select a graphic first'
                                   }
                                   onClick={() =>

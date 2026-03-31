@@ -9,7 +9,6 @@
     "minKeepMs": 150,
     "attentionLengthMs": 3000,
     "maxWords": 3,
-    "graphicDisplaySec": 5,
     "graphicWidthPercent": 30,
     "captionFontSize": 56,
     "captionFontColor": "#fff700",

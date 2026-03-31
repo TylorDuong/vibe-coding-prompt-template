@@ -12,7 +12,8 @@ import SfxPoolPanel, {
   type SfxSlot,
 } from './components/SfxPoolPanel'
 import TimelinePreview, { type TimelineData } from './components/TimelinePreview'
-import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
+import GraphicsSidebar from './components/GraphicsSidebar'
+import type { GraphicItem } from './lib/graphicsTypes'
 import ExportVideoButton from './components/ExportVideoButton'
 import {
   useProcessPipeline,
@@ -26,6 +27,8 @@ import {
   filterTimelineSfxForDisplay,
   mergeTimelineWithMatches,
   countTimelineEventTypes,
+  segmentEndForWordAt,
+  type PlacementEndMode,
   type WordTrigger,
   type TimelineDataLike,
 } from './lib/graphicPlacements'
@@ -49,18 +52,19 @@ function App(): React.JSX.Element {
   const [sfxSlots, setSfxSlots] = useState<SfxSlot[]>(DEFAULT_SFX_SLOTS)
   const [selectedGraphicId, setSelectedGraphicId] = useState<string | null>(null)
   const [wordTriggers, setWordTriggers] = useState<Record<string, WordTrigger>>({})
+  const [placementEndMode, setPlacementEndMode] = useState<PlacementEndMode>('word')
+  const [pendingPlacementStart, setPendingPlacementStart] = useState<{
+    start: number
+    end: number
+    word: string
+  } | null>(null)
   const [timelineFloating, setTimelineFloating] = useState(false)
   const pipeline = useProcessPipeline()
 
   const exportMatches = useMemo(() => {
     if (!pipeline.result) return []
-    return buildExportMatches(
-      graphics,
-      pipeline.result.matches,
-      wordTriggers,
-      config.graphicDisplaySec,
-    )
-  }, [pipeline.result, graphics, wordTriggers, config.graphicDisplaySec])
+    return buildExportMatches(graphics, pipeline.result.matches, wordTriggers)
+  }, [pipeline.result, graphics, wordTriggers])
 
   const sfxPoolExport = useMemo(() => buildSfxPool(sfxSlots), [sfxSlots])
   const sfxAssignmentsExport = useMemo(() => buildSfxAssignments(sfxSlots), [sfxSlots])
@@ -154,6 +158,7 @@ function App(): React.JSX.Element {
   const handleFileAccepted = useCallback((filePath: string, meta: FileMetadata) => {
     setLoadedFile({ filePath, meta })
     setWordTriggers({})
+    setPendingPlacementStart(null)
     setSelectedGraphicId(null)
     pipeline.reset()
   }, [pipeline])
@@ -161,6 +166,7 @@ function App(): React.JSX.Element {
   const handleClear = useCallback(() => {
     setLoadedFile(null)
     setWordTriggers({})
+    setPendingPlacementStart(null)
     setSelectedGraphicId(null)
     pipeline.reset()
   }, [pipeline])
@@ -197,29 +203,62 @@ function App(): React.JSX.Element {
       delete next[id]
       return next
     })
+    setPendingPlacementStart(null)
   }, [])
 
   const handleWordAssign = useCallback(
     (payload: { start: number; end: number; word: string }) => {
-      if (!selectedGraphicId) return
-      setWordTriggers((prev) => ({
-        ...prev,
-        [selectedGraphicId]: {
-          start: payload.start,
-          end: payload.end,
-          word: payload.word,
-        },
-      }))
+      if (!selectedGraphicId || !pipeline.result) return
+      const segments = pipeline.result.segments as Array<{
+        start: number
+        end: number
+        words?: Array<{ start: number; end: number; word?: string }>
+      }>
+
+      setPendingPlacementStart((prev) => {
+        if (!prev) {
+          return payload
+        }
+        let first = prev
+        let second = payload
+        if (second.start < first.start) {
+          const swap = first
+          first = second
+          second = swap
+        }
+        const sentenceEnd = segmentEndForWordAt(segments, second.start)
+        const endT =
+          placementEndMode === 'sentence' && sentenceEnd != null
+            ? Math.max(sentenceEnd, second.end, first.start + 0.05)
+            : Math.max(second.end, first.start + 0.05)
+
+        setWordTriggers((p) => ({
+          ...p,
+          [selectedGraphicId]: {
+            start: first.start,
+            end: endT,
+            startWord: first.word.trim() || '·',
+            endWord: second.word.trim() || '·',
+            endMode: placementEndMode,
+          },
+        }))
+        return null
+      })
     },
-    [selectedGraphicId],
+    [selectedGraphicId, placementEndMode, pipeline.result],
   )
 
   const handleProcess = useCallback(async () => {
     if (!loadedFile) return
     setWordTriggers({})
+    setPendingPlacementStart(null)
     setSelectedGraphicId(null)
     pipeline.run(loadedFile.filePath, graphics, config)
   }, [loadedFile, graphics, config, pipeline])
+
+  useEffect(() => {
+    setPendingPlacementStart(null)
+  }, [selectedGraphicId])
 
   const isProcessing =
     pipeline.progress.stage !== 'idle' &&
@@ -342,6 +381,7 @@ function App(): React.JSX.Element {
                     attentionLengthMs={config.attentionLengthMs}
                     selectedGraphicId={selectedGraphicId}
                     wordTriggers={wordTriggers}
+                    pendingPlacementStart={pendingPlacementStart}
                     onWordAssign={handleWordAssign}
                     pipelineConfig={config}
                     onFloatingTimelineChange={setTimelineFloating}
@@ -370,6 +410,8 @@ function App(): React.JSX.Element {
                         onSelect={setSelectedGraphicId}
                         wordTriggers={wordTriggers}
                         onClearPlacement={handleClearWordPlacement}
+                        placementEndMode={placementEndMode}
+                        onPlacementEndModeChange={setPlacementEndMode}
                       />
                     }
                   />

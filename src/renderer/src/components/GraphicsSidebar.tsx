@@ -1,12 +1,10 @@
 import { useState, useCallback, type DragEvent } from 'react'
 import type { PipelineConfig } from '../hooks/useProcessPipeline'
+import type { PlacementEndMode, WordTrigger } from '../lib/graphicPlacements'
+import type { GraphicItem, GraphicKind } from '../lib/graphicsTypes'
+import { absPathToLocalFileUrl } from '../lib/localFileUrl'
 
-export type GraphicItem = {
-  id: string
-  filePath: string
-  fileName: string
-  tag: string
-}
+export type { GraphicItem } from '../lib/graphicsTypes'
 
 type GraphicsSidebarProps = {
   graphics: GraphicItem[]
@@ -15,27 +13,33 @@ type GraphicsSidebarProps = {
   onTagChange: (id: string, tag: string) => void
   selectedId: string | null
   onSelect: (id: string | null) => void
-  /** Set when user linked a transcript word to this graphic */
-  wordTriggers: Record<string, { start: number; word: string }>
+  wordTriggers: Record<string, WordTrigger>
   onClearPlacement: (id: string) => void
-  /** Next to transcript column (rounded card) vs full-height page rail */
+  placementEndMode: PlacementEndMode
+  onPlacementEndModeChange: (mode: PlacementEndMode) => void
   embedded?: boolean
   pipelineConfig: PipelineConfig
   onPipelineConfigChange: (config: PipelineConfig) => void
   configDisabled?: boolean
 }
 
-type DialogImagesResult = {
+type DialogMediaResult = {
   canceled: boolean
   filePaths: string[]
 }
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'])
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.m4v', '.webm', '.mov', '.mkv', '.avi'])
 
 let nextId = 0
 
 function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).pop() ?? filePath
+}
+
+function kindForPath(filePath: string): GraphicKind {
+  const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
+  return VIDEO_EXTENSIONS.has(ext) ? 'video' : 'image'
 }
 
 export default function GraphicsSidebar({
@@ -47,6 +51,8 @@ export default function GraphicsSidebar({
   onSelect,
   wordTriggers,
   onClearPlacement,
+  placementEndMode,
+  onPlacementEndModeChange,
   embedded = false,
   pipelineConfig,
   onPipelineConfigChange,
@@ -69,20 +75,33 @@ export default function GraphicsSidebar({
         filePath,
         fileName: fileNameFromPath(filePath),
         tag: '',
+        kind: kindForPath(filePath),
       })
     },
-    [onAdd]
+    [onAdd],
   )
 
-  const handleBrowse = useCallback(async () => {
+  const handleBrowseImages = useCallback(async () => {
     try {
-      const result = (await window.electron.invoke('dialog:openImages')) as DialogImagesResult
+      const result = (await window.electron.invoke('dialog:openImages')) as DialogMediaResult
       if (result.canceled || !result.filePaths.length) return
       for (const fp of result.filePaths) {
         addFromPath(fp)
       }
     } catch {
-      // dialog failed silently
+      /* dialog failed */
+    }
+  }, [addFromPath])
+
+  const handleBrowseMedia = useCallback(async () => {
+    try {
+      const result = (await window.electron.invoke('dialog:openGraphicMedia')) as DialogMediaResult
+      if (result.canceled || !result.filePaths.length) return
+      for (const fp of result.filePaths) {
+        addFromPath(fp)
+      }
+    } catch {
+      /* dialog failed */
     }
   }, [addFromPath])
 
@@ -98,12 +117,12 @@ export default function GraphicsSidebar({
         if (!filePath) continue
 
         const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
-        if (!IMAGE_EXTENSIONS.has(ext)) continue
+        if (!IMAGE_EXTENSIONS.has(ext) && !VIDEO_EXTENSIONS.has(ext)) continue
 
         addFromPath(filePath)
       }
     },
-    [addFromPath]
+    [addFromPath],
   )
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -128,12 +147,44 @@ export default function GraphicsSidebar({
         className={`space-y-1 border-b border-zinc-800 ${embedded ? 'px-3 py-2' : 'px-4 py-3'}`}
       >
         <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-          Graphics ({graphics.length})
+          Graphics & clips ({graphics.length})
         </h2>
         <p className="text-[10px] leading-snug text-zinc-600">
-          Select a graphic, then click a word in the transcript to set when it appears. Tags are optional
-          (auto-match still runs as a fallback).
+          Select an item, click a start word in the transcript, then an end word. Range highlights show
+          on-screen timing. Tags are optional (auto-match still runs as a fallback).
         </p>
+      </div>
+
+      <div
+        className={`space-y-2 border-b border-zinc-800 ${embedded ? 'px-3 py-2' : 'px-4 py-2'}`}
+      >
+        <h3 className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+          Placement end
+        </h3>
+        <div className="flex flex-wrap gap-2 text-[10px] text-zinc-500">
+          <label className="flex cursor-pointer items-center gap-1.5">
+            <input
+              type="radio"
+              name="placement-end"
+              checked={placementEndMode === 'word'}
+              onChange={() => onPlacementEndModeChange('word')}
+              disabled={disabled}
+              className="accent-blue-500"
+            />
+            End of end word
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5">
+            <input
+              type="radio"
+              name="placement-end"
+              checked={placementEndMode === 'sentence'}
+              onChange={() => onPlacementEndModeChange('sentence')}
+              disabled={disabled}
+              className="accent-blue-500"
+            />
+            End of sentence (segment)
+          </label>
+        </div>
       </div>
 
       <div
@@ -177,21 +228,12 @@ export default function GraphicsSidebar({
               className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
             >
               <option value="none">None</option>
-              <option value="slide_in">Slide in</option>
+              <option value="slide_in">Slide in (right)</option>
+              <option value="slide_left">Slide from left</option>
+              <option value="slide_up">Slide up</option>
+              <option value="slide_down">Slide down</option>
+              <option value="scale_in">Scale in</option>
             </select>
-          </label>
-          <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
-            On-screen (s)
-            <input
-              type="number"
-              min={0.5}
-              max={30}
-              step={0.5}
-              value={pipelineConfig.graphicDisplaySec}
-              onChange={(e) => patchConfig({ graphicDisplaySec: Number(e.target.value) })}
-              disabled={disabled}
-              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
-            />
           </label>
           <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
             Width (%)
@@ -248,7 +290,6 @@ export default function GraphicsSidebar({
         </div>
       </div>
 
-      {/* Drop zone + browse button */}
       <div
         onDrop={handleDrop}
         onDragOver={handleDragOver}
@@ -259,17 +300,27 @@ export default function GraphicsSidebar({
           ${isDragging ? 'border-blue-500 bg-blue-500/5 text-blue-400' : 'border-zinc-800 text-zinc-600'}
         `}
       >
-        <span>{isDragging ? 'Release to add' : 'Drop images here'}</span>
-        <button
-          onClick={handleBrowse}
-          className="rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-400
-                     hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
-        >
-          Browse...
-        </button>
+        <span>{isDragging ? 'Release to add' : 'Drop images or video clips here'}</span>
+        <div className="flex flex-wrap justify-center gap-2">
+          <button
+            type="button"
+            onClick={handleBrowseImages}
+            className="rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-400
+                       hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
+          >
+            Images…
+          </button>
+          <button
+            type="button"
+            onClick={handleBrowseMedia}
+            className="rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-400
+                       hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
+          >
+            Images + clips…
+          </button>
+        </div>
       </div>
 
-      {/* Graphics list */}
       <div className={`flex-1 space-y-2 overflow-auto ${embedded ? 'p-2' : 'p-3'}`}>
         {graphics.map((g) => (
           <div
@@ -291,15 +342,30 @@ export default function GraphicsSidebar({
               }`}
             >
               <div className="flex gap-2">
-                <div className="shrink-0 h-12 w-12 rounded overflow-hidden bg-zinc-800">
-                  <img
-                    src={`local-file://${encodeURIComponent(g.filePath)}`}
-                    alt={g.fileName}
-                    className="h-full w-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none'
-                    }}
-                  />
+                <div className="relative shrink-0 h-12 w-12 rounded overflow-hidden bg-zinc-800">
+                  {g.kind === 'video' ? (
+                    <video
+                      src={absPathToLocalFileUrl(g.filePath)}
+                      className="h-full w-full object-cover"
+                      muted
+                      playsInline
+                      preload="metadata"
+                    />
+                  ) : (
+                    <img
+                      src={absPathToLocalFileUrl(g.filePath)}
+                      alt={g.fileName}
+                      className="h-full w-full object-cover"
+                      onError={(e) => {
+                        ;(e.target as HTMLImageElement).style.display = 'none'
+                      }}
+                    />
+                  )}
+                  {g.kind === 'video' ? (
+                    <span className="absolute bottom-0 right-0 rounded-tl bg-black/70 px-0.5 text-[8px] text-zinc-300">
+                      VID
+                    </span>
+                  ) : null}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
@@ -329,8 +395,13 @@ export default function GraphicsSidebar({
                                placeholder:text-zinc-600 outline-none focus:ring-1 focus:ring-blue-500/50"
                   />
                   {wordTriggers[g.id] && (
-                    <p className="mt-1 text-[10px] text-emerald-500/90 truncate" title={wordTriggers[g.id].word}>
-                      @ {wordTriggers[g.id].start.toFixed(2)}s — “{wordTriggers[g.id].word}”
+                    <p
+                      className="mt-1 text-[10px] text-emerald-500/90 truncate"
+                      title={`${wordTriggers[g.id].startWord} → ${wordTriggers[g.id].endWord}`}
+                    >
+                      @ {wordTriggers[g.id].start.toFixed(2)}s–{wordTriggers[g.id].end.toFixed(2)}s — “
+                      {wordTriggers[g.id].startWord}” → “{wordTriggers[g.id].endWord}” (
+                      {wordTriggers[g.id].endMode})
                     </p>
                   )}
                 </div>
@@ -342,7 +413,7 @@ export default function GraphicsSidebar({
                 onClick={() => onClearPlacement(g.id)}
                 className="mt-1.5 w-full rounded bg-zinc-800 py-1 text-[10px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700"
               >
-                Clear word placement
+                Clear placement
               </button>
             )}
           </div>

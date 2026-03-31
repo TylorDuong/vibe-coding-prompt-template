@@ -37,7 +37,6 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   minKeepMs: 150,
   attentionLengthMs: 3000,
   maxWords: 3,
-  graphicDisplaySec: 2,
   graphicWidthPercent: 85,
   captionFontSize: 28,
   captionFontColor: '#FFFFFF',
@@ -86,8 +85,20 @@ function pickGraphicPosition(raw: unknown): GraphicPosition {
     : 'center'
 }
 
+const GRAPHIC_MOTIONS: GraphicMotion[] = [
+  'none',
+  'slide_in',
+  'slide_right',
+  'slide_left',
+  'slide_up',
+  'slide_down',
+  'scale_in',
+]
+
 function pickGraphicMotion(raw: unknown): GraphicMotion {
-  return raw === 'slide_in' ? 'slide_in' : 'none'
+  return typeof raw === 'string' && (GRAPHIC_MOTIONS as string[]).includes(raw)
+    ? (raw as GraphicMotion)
+    : 'none'
 }
 
 function pickHexColor(raw: unknown, fallback: string): string {
@@ -153,13 +164,6 @@ export function mergePipelineConfigFromUnknown(
       typeof g('maxWords') === 'number' ? (g('maxWords') as number) : defaults.maxWords,
       1,
       20,
-    ),
-    graphicDisplaySec: clamp(
-      typeof g('graphicDisplaySec') === 'number'
-        ? (g('graphicDisplaySec') as number)
-        : defaults.graphicDisplaySec,
-      0.5,
-      30,
     ),
     graphicWidthPercent: clamp(
       typeof g('graphicWidthPercent') === 'number'

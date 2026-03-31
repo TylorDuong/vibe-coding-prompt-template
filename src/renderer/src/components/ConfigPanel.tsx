@@ -1,5 +1,10 @@
+import { useId, useMemo } from 'react'
 import type { OutputAspectRatio, PipelineConfig } from '../hooks/useProcessPipeline'
 import type { SfxSlot } from './SfxPoolPanel'
+import {
+  captionOutlineShadowCqw,
+  captionPreviewFontSizeCss,
+} from '../lib/captionPreviewStyle'
 import {
   parsePipelinePresetJson,
   serializeSplittyPreset,
@@ -15,12 +20,6 @@ type SavePresetResult =
   | { canceled: false; filePath: string }
   | { canceled: false; error: string }
 
-function captionPreviewShadow(outlinePx: number, outlineColor: string): string | undefined {
-  if (outlinePx <= 0) return undefined
-  const c = outlineColor
-  return `${outlinePx}px 0 0 ${c}, -${outlinePx}px 0 0 ${c}, 0 ${outlinePx}px 0 ${c}, 0 -${outlinePx}px 0 ${c}`
-}
-
 const ASPECT_RATIO_CSS: Record<PipelineConfig['outputAspectRatio'], string | undefined> = {
   original: undefined,
   '16:9': '16 / 9',
@@ -29,11 +28,44 @@ const ASPECT_RATIO_CSS: Record<PipelineConfig['outputAspectRatio'], string | und
   '4:5': '4 / 5',
 }
 
+const CAPTION_PREVIEW_SAMPLE =
+  'Sample caption that wraps on narrow frames so you can check size and line breaks before export.'
+
 function CaptionStylePreview({ config }: { config: PipelineConfig }): React.JSX.Element {
-  const outline = Math.max(0, config.captionBorderWidth)
-  const fs = Math.min(Math.max(10, config.captionFontSize * 0.32), 26)
+  const animId = useId().replace(/[^a-zA-Z0-9_-]/g, '_')
+  const fadeIn = Math.max(0, config.captionFadeInSec)
+  const fadeOut = Math.max(0, config.captionFadeOutSec)
+  const holdSec = 2
+  const periodSec = fadeIn + holdSec + fadeOut
+  const useFadeLoop = fadeIn > 0.001 || fadeOut > 0.001
+
+  const keyframesCss = useMemo(() => {
+    if (!useFadeLoop || periodSec <= 0.001) return ''
+    const pIn = (fadeIn / periodSec) * 100
+    const pHold = ((fadeIn + holdSec) / periodSec) * 100
+    const lines: string[] = [`@keyframes caption_preview_${animId} {`]
+    if (fadeIn > 0.001) {
+      lines.push('  0% { opacity: 0; }')
+      lines.push(`  ${pIn.toFixed(4)}% { opacity: 1; }`)
+    } else {
+      lines.push('  0% { opacity: 1; }')
+    }
+    if (fadeOut > 0.001) {
+      lines.push(`  ${pHold.toFixed(4)}% { opacity: 1; }`)
+      lines.push('  100% { opacity: 0; }')
+    } else {
+      lines.push('  99.99% { opacity: 1; }')
+      lines.push('  100% { opacity: 0; }')
+    }
+    lines.push('}')
+    return lines.join('\n')
+  }, [animId, fadeIn, fadeOut, holdSec, periodSec, useFadeLoop])
+
   const isCenter = config.captionPosition === 'center'
-  const shadow = captionPreviewShadow(outline, config.captionOutlineColor)
+  const shadow = captionOutlineShadowCqw(
+    config.captionBorderWidth,
+    config.captionOutlineColor,
+  )
   const aspectRatio = ASPECT_RATIO_CSS[config.outputAspectRatio]
   const aspectNote =
     config.outputAspectRatio === 'original'
@@ -48,28 +80,34 @@ function CaptionStylePreview({ config }: { config: PipelineConfig }): React.JSX.
           aspectRatio ? '' : 'aspect-video'
         } ${bgClass}`}
         style={{
+          containerType: 'inline-size',
           ...bgStyle,
           ...(aspectRatio ? { aspectRatio } : {}),
         }}
       >
         <div
-          className={`absolute inset-x-0 flex justify-center px-1 ${
+          className={`absolute inset-x-0 flex justify-center px-[2cqw] ${
             isCenter ? 'top-1/2 -translate-y-1/2' : 'bottom-2'
           }`}
         >
           <span
-            className="inline-block text-center leading-tight"
+            className="inline-block max-w-[min(96%,calc(100cqw-4cqw))] text-center leading-tight break-words whitespace-pre-wrap"
             style={{
-              fontSize: fs,
+              fontSize: captionPreviewFontSizeCss(config.captionFontSize),
               color: config.captionFontColor,
               fontWeight: config.captionBold ? 700 : 400,
               textShadow: shadow,
               backgroundColor: config.captionBox ? 'rgba(0,0,0,0.55)' : undefined,
               padding: config.captionBox ? '3px 8px' : undefined,
               borderRadius: config.captionBox ? 6 : undefined,
+              ...(useFadeLoop && keyframesCss
+                ? {
+                    animation: `caption_preview_${animId} ${periodSec.toFixed(3)}s linear infinite`,
+                  }
+                : {}),
             }}
           >
-            Sample caption text
+            {CAPTION_PREVIEW_SAMPLE}
           </span>
         </div>
       </div>
@@ -78,8 +116,13 @@ function CaptionStylePreview({ config }: { config: PipelineConfig }): React.JSX.
 
   return (
     <div className="mt-4">
+      {keyframesCss ? <style>{keyframesCss}</style> : null}
       <p className="mb-1.5 text-[10px] text-zinc-600">
-        Caption preview (approximate; export uses FFmpeg). {aspectNote}
+        Caption preview scales like the timeline preview (720px-wide reference).{' '}
+        {useFadeLoop
+          ? `Animation loops: fade in (${fadeIn}s), hold ${holdSec}s, fade out (${fadeOut}s). `
+          : ''}
+        {aspectNote}
       </p>
       <div className="flex flex-wrap gap-2">
         {frame('bg-white', undefined, 'White')}

@@ -42,6 +42,21 @@ function clampNumber(raw: unknown, min: number, max: number, fallback: number): 
   return Math.max(min, Math.min(max, n))
 }
 
+const GRAPHIC_MOTIONS = new Set([
+  'none',
+  'slide_in',
+  'slide_right',
+  'slide_left',
+  'slide_up',
+  'slide_down',
+  'scale_in',
+])
+
+function sanitizeGraphicMotion(raw: unknown): string {
+  const s = typeof raw === 'string' ? raw.trim().toLowerCase() : 'none'
+  return GRAPHIC_MOTIONS.has(s) ? s : 'none'
+}
+
 function ipcError(message: string) {
   return { ok: false, error: message }
 }
@@ -84,6 +99,38 @@ export function registerIpcHandlers(): void {
       title: 'Select graphic images',
       filters: [
         { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'] },
+      ],
+      properties: ['openFile', 'multiSelections'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, filePaths: [] }
+    }
+    return { canceled: false, filePaths: result.filePaths }
+  })
+
+  ipcMain.handle('dialog:openGraphicMedia', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Select graphics or video clips',
+      filters: [
+        {
+          name: 'Graphics & video',
+          extensions: [
+            'png',
+            'jpg',
+            'jpeg',
+            'gif',
+            'webp',
+            'svg',
+            'bmp',
+            'mp4',
+            'm4v',
+            'webm',
+            'mov',
+            'mkv',
+            'avi',
+          ],
+        },
       ],
       properties: ['openFile', 'multiSelections'],
     })
@@ -195,7 +242,13 @@ export function registerIpcHandlers(): void {
         minKeepMs: clampNumber(p.minKeepMs, 0, 1000, 150),
         attentionLengthMs: clampNumber(p.attentionLengthMs, 500, 60000, 3000),
         maxWords: clampNumber(p.maxWords, 1, 20, 3),
-        graphicDisplaySec: clampNumber(p.graphicDisplaySec, 0.5, 30, 2),
+        captionFontSize: clampNumber(p.captionFontSize, 12, 120, 24),
+        captionBold: Boolean(p.captionBold),
+        outputAspectRatio: ['original', '16:9', '9:16', '1:1', '4:5'].includes(
+          String(p.outputAspectRatio),
+        )
+          ? String(p.outputAspectRatio)
+          : 'original',
         faceZoomEnabled: Boolean(p.faceZoomEnabled),
         faceZoomIntervalSec: clampNumber(p.faceZoomIntervalSec, 0.5, 30, 3),
         faceZoomPulseSec: clampNumber(p.faceZoomPulseSec, 0.05, 2, 0.35),
@@ -254,7 +307,7 @@ export function registerIpcHandlers(): void {
     ].includes(String(p.graphicPosition))
       ? String(p.graphicPosition)
       : 'center'
-    const gmot = p.graphicMotion === 'slide_in' ? 'slide_in' : 'none'
+    const gmot = sanitizeGraphicMotion(p.graphicMotion)
 
     return sendToEngine(
       {
@@ -272,7 +325,6 @@ export function registerIpcHandlers(): void {
         mergeGapMs: clampNumber(p.mergeGapMs, 0, 2000, 300),
         minKeepMs: clampNumber(p.minKeepMs, 0, 1000, 150),
         attentionLengthMs: clampNumber(p.attentionLengthMs, 500, 60000, 3000),
-        graphicDisplaySec: clampNumber(p.graphicDisplaySec, 0.5, 30, 2),
         graphicWidthPercent: clampNumber(p.graphicWidthPercent, 10, 100, 85),
         captionFontSize: clampNumber(p.captionFontSize, 12, 120, 24),
         captionFontColor:
@@ -336,7 +388,7 @@ export function registerIpcHandlers(): void {
     ].includes(String(p.graphicPosition))
       ? String(p.graphicPosition)
       : 'center'
-    const gmot = p.graphicMotion === 'slide_in' ? 'slide_in' : 'none'
+    const gmot = sanitizeGraphicMotion(p.graphicMotion)
 
     try {
       const result = (await sendToEngine(
@@ -357,7 +409,6 @@ export function registerIpcHandlers(): void {
           mergeGapMs: clampNumber(p.mergeGapMs, 0, 2000, 300),
           minKeepMs: clampNumber(p.minKeepMs, 0, 1000, 150),
           attentionLengthMs: clampNumber(p.attentionLengthMs, 500, 60000, 3000),
-          graphicDisplaySec: clampNumber(p.graphicDisplaySec, 0.5, 30, 2),
           graphicWidthPercent: clampNumber(p.graphicWidthPercent, 10, 100, 85),
           captionFontSize: clampNumber(p.captionFontSize, 12, 120, 24),
           captionFontColor:

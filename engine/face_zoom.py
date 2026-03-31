@@ -80,10 +80,8 @@ def sample_face_center_normalized(video_path: str, max_samples: int = 16) -> tup
 def graphic_overlay_intervals_output(
     matches: list[dict[str, Any]],
     keep_segments: list[dict[str, float]],
-    graphic_display_sec: float,
 ) -> list[tuple[float, float]]:
-    """Output-timeline intervals [start,end) where a graphic is shown."""
-    cap_sec = max(0.2, min(float(graphic_display_sec), 60.0))
+    """Output-timeline intervals [start,end) where a graphic is shown (full match span)."""
     out: list[tuple[float, float]] = []
     for m in matches:
         fp = m.get("graphic", "")
@@ -91,8 +89,8 @@ def graphic_overlay_intervals_output(
             continue
         g_start = float(m["matched_segment_start"])
         g_end_src = float(m.get("matched_segment_end", g_start + 3.0))
-        span = min(max(0.0, g_end_src - g_start), cap_sec)
-        g_end = g_start + span
+        span = max(0.0, g_end_src - g_start)
+        g_end = g_start + (span if span >= 0.05 else 0.2)
         t0 = _source_time_to_output(g_start, keep_segments)
         t1 = _source_time_to_output(g_end, keep_segments)
         if t1 > t0:

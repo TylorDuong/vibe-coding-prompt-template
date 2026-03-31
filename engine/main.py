@@ -22,8 +22,11 @@ from engine.match import semantic_match
 from engine.polish import build_events
 from engine.render import (
     build_caption_chunks,
+    normalize_graphic_motion,
+    output_cropped_dimensions,
     remap_caption_chunks,
     render_full,
+    wrap_caption_chunks_for_frame,
 )
 from engine.face_zoom import (
     compute_zoom_windows_output,
@@ -128,8 +131,12 @@ def handle(message: dict) -> EngineResult:
         min_keep_ms = int(sanitize_number(message.get("minKeepMs"), 0, 1000, 150))
         attention_ms = int(sanitize_number(message.get("attentionLengthMs"), 500, 60000, 3000))
         max_words = int(sanitize_number(message.get("maxWords"), 1, 20, 3))
-        graphic_preview_sec = float(
-            sanitize_number(message.get("graphicDisplaySec"), 0.5, 30.0, 2.0)
+        caption_font_preview = int(sanitize_number(message.get("captionFontSize"), 12, 120, 24))
+        caption_bold_preview = bool(message.get("captionBold"))
+        output_aspect_preview = _sanitize_choice(
+            message.get("outputAspectRatio"),
+            {"original", "16:9", "9:16", "1:1", "4:5"},
+            "original",
         )
         face_zoom_preview = bool(message.get("faceZoomEnabled"))
         face_zoom_iv = float(sanitize_number(message.get("faceZoomIntervalSec"), 0.5, 30.0, 3.0))
@@ -198,13 +205,19 @@ def handle(message: dict) -> EngineResult:
             build_caption_chunks(segments, max_words),
             keep_segments,
         )
+        cw_prev, _ch_prev = output_cropped_dimensions(video_path, output_aspect_preview)
+        cap_wrapped = wrap_caption_chunks_for_frame(
+            cap_chunks,
+            cw_prev,
+            48,
+            caption_font_preview,
+            caption_bold_preview,
+        )
         caption_preview_chunks = [
             {"text": str(c.get("text", "")), "start": float(c["start"]), "end": float(c["end"])}
-            for c in cap_chunks
+            for c in cap_wrapped
         ]
-        giv = graphic_overlay_intervals_output(
-            matches_list, keep_segments, graphic_preview_sec
-        )
+        giv = graphic_overlay_intervals_output(matches_list, keep_segments)
         graphic_preview_intervals = [{"start": a, "end": b} for a, b in giv]
         face_center_preview: dict[str, float] | None = None
         zoom_windows_preview: list[dict[str, float]] = []
@@ -268,7 +281,6 @@ def handle(message: dict) -> EngineResult:
         merge_gap_ms = int(sanitize_number(message.get("mergeGapMs"), 0, 2000, 300))
         min_keep_ms = int(sanitize_number(message.get("minKeepMs"), 0, 1000, 150))
         attention_ms = int(sanitize_number(message.get("attentionLengthMs"), 500, 60000, 3000))
-        graphic_sec = float(sanitize_number(message.get("graphicDisplaySec"), 0.5, 30.0, 2.0))
         graphic_w_pct = float(sanitize_number(message.get("graphicWidthPercent"), 10.0, 100.0, 85.0))
         graphic_width_frac = graphic_w_pct / 100.0
         caption_font_size = int(sanitize_number(message.get("captionFontSize"), 12, 120, 24))
@@ -289,9 +301,7 @@ def handle(message: dict) -> EngineResult:
             {"center", "top", "bottom", "top_right", "top_left", "bottom_right", "bottom_left"},
             "center",
         )
-        graphic_motion = _sanitize_choice(
-            message.get("graphicMotion"), {"none", "slide_in"}, "none"
-        )
+        graphic_motion = normalize_graphic_motion(str(message.get("graphicMotion") or ""), "none")
         graphic_anim_in = float(sanitize_number(message.get("graphicAnimInSec"), 0.0, 3.0, 0.25))
         sfx_cap_n = int(sanitize_number(message.get("sfxCaptionEveryN"), 0, 20, 1))
         sfx_gfx_n = int(sanitize_number(message.get("sfxGraphicEveryN"), 0, 20, 1))
@@ -343,7 +353,6 @@ def handle(message: dict) -> EngineResult:
             keep_segments=keep_segments,
             events=events,
             max_words=max_words,
-            graphic_display_sec=graphic_sec,
             graphic_width_frac=graphic_width_frac,
             caption_font_size=caption_font_size,
             caption_font_color_hex=caption_font_color,
@@ -398,7 +407,6 @@ def handle(message: dict) -> EngineResult:
         merge_gap_ms = int(sanitize_number(message.get("mergeGapMs"), 0, 2000, 300))
         min_keep_ms = int(sanitize_number(message.get("minKeepMs"), 0, 1000, 150))
         attention_ms = int(sanitize_number(message.get("attentionLengthMs"), 500, 60000, 3000))
-        graphic_sec = float(sanitize_number(message.get("graphicDisplaySec"), 0.5, 30.0, 2.0))
         graphic_w_pct = float(sanitize_number(message.get("graphicWidthPercent"), 10.0, 100.0, 85.0))
         graphic_width_frac = graphic_w_pct / 100.0
         caption_font_size = int(sanitize_number(message.get("captionFontSize"), 12, 120, 24))
@@ -419,9 +427,7 @@ def handle(message: dict) -> EngineResult:
             {"center", "top", "bottom", "top_right", "top_left", "bottom_right", "bottom_left"},
             "center",
         )
-        graphic_motion = _sanitize_choice(
-            message.get("graphicMotion"), {"none", "slide_in"}, "none"
-        )
+        graphic_motion = normalize_graphic_motion(str(message.get("graphicMotion") or ""), "none")
         graphic_anim_in = float(sanitize_number(message.get("graphicAnimInSec"), 0.0, 3.0, 0.25))
         sfx_cap_n = int(sanitize_number(message.get("sfxCaptionEveryN"), 0, 20, 1))
         sfx_gfx_n = int(sanitize_number(message.get("sfxGraphicEveryN"), 0, 20, 1))
@@ -500,7 +506,6 @@ def handle(message: dict) -> EngineResult:
             keep_segments=keep_segments,
             events=events,
             max_words=max_words,
-            graphic_display_sec=graphic_sec,
             graphic_width_frac=graphic_width_frac,
             caption_font_size=caption_font_size,
             caption_font_color_hex=caption_font_color,

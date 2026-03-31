@@ -121,6 +121,8 @@ export type GraphicMatchLike = {
   matched_segment_start: number
   matched_segment_end: number
   similarity: number
+  /** When true, scrub preview uses a video element (optional). */
+  isVideo?: boolean
 }
 
 /** Align scrub preview with FFmpeg `between(t,a,b)` (inclusive). */
@@ -128,25 +130,37 @@ export const EXPORT_SCRUB_TIME_EPS = 1e-4
 
 /**
  * Which graphic is visible at output time `tOut`, matching export overlay logic
- * (`graphic_display_sec` cap + `remap_interval` per match).
+ * (full matched span, remapped through keep segments).
  */
+/** Source-time span for a graphic match (matches engine/render windowing). */
+export function graphicSourceSpan(m: GraphicMatchLike): { start: number; end: number } {
+  const gStart = m.matched_segment_start
+  const gEndSrc =
+    m.matched_segment_end > m.matched_segment_start
+      ? m.matched_segment_end
+      : m.matched_segment_start + 3.0
+  const span = Math.max(0, gEndSrc - gStart)
+  const gEnd = gStart + (span >= 0.05 ? span : 0.2)
+  return { start: gStart, end: gEnd }
+}
+
+export function graphicMatchRemappedOut(
+  m: GraphicMatchLike,
+  keepSegments: KeepSegment[],
+): { start: number; end: number } | null {
+  const { start, end } = graphicSourceSpan(m)
+  return remapInterval(start, end, keepSegments)
+}
+
 export function activeGraphicMatchAtOutputTime<M extends GraphicMatchLike>(
   tOut: number,
   matches: M[],
   keepSegments: KeepSegment[],
-  graphicDisplaySec: number,
 ): M | null {
-  const capSec = Math.max(0.2, Math.min(graphicDisplaySec, 60))
   for (const m of matches) {
     if ((m.similarity ?? 0) < 0.1) continue
     if (typeof m.graphic !== 'string' || m.graphic.length === 0) continue
-    const gStart = m.matched_segment_start
-    const gEndSrc =
-      m.matched_segment_end > m.matched_segment_start
-        ? m.matched_segment_end
-        : m.matched_segment_start + 3.0
-    const span = Math.min(Math.max(0, gEndSrc - gStart), capSec)
-    const gEnd = gStart + span
+    const { start: gStart, end: gEnd } = graphicSourceSpan(m)
     const r = remapInterval(gStart, gEnd, keepSegments)
     if (r == null) continue
     // FFmpeg overlay enable uses between(t,start,end) (inclusive); stay aligned for scrub preview.

@@ -73,7 +73,7 @@ describe('remapInterval', () => {
 })
 
 describe('activeGraphicMatchAtOutputTime', () => {
-  it('uses graphicDisplaySec cap and output timeline like export', () => {
+  it('uses full matched span on output timeline like export', () => {
     const keep = [{ start: 0, end: 10 }]
     const m = {
       graphic: '/g.png',
@@ -81,9 +81,9 @@ describe('activeGraphicMatchAtOutputTime', () => {
       matched_segment_end: 10,
       similarity: 1,
     }
-    expect(activeGraphicMatchAtOutputTime(3, [m], keep, 2)).toEqual(m)
-    expect(activeGraphicMatchAtOutputTime(4, [m], keep, 2)).toEqual(m)
-    expect(activeGraphicMatchAtOutputTime(4.001, [m], keep, 2)).toBeNull()
+    expect(activeGraphicMatchAtOutputTime(3, [m], keep)).toEqual(m)
+    expect(activeGraphicMatchAtOutputTime(9, [m], keep)).toEqual(m)
+    expect(activeGraphicMatchAtOutputTime(10.02, [m], keep)).toBeNull()
   })
 })
 

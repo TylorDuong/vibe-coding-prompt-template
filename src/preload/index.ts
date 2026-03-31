@@ -22,6 +22,7 @@ const ALLOWED_CHANNELS = [
   'engine:cutSilences',
   'dialog:openVideo',
   'dialog:openImages',
+  'dialog:openGraphicMedia',
   'dialog:saveVideo',
   'engine:exportFull',
   'engine:encodePreview',

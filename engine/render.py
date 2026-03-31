@@ -138,8 +138,10 @@ def _ffprobe_stream_dimensions(path: str) -> tuple[int, int]:
     raise RuntimeError("No dimensions in ffprobe output")
 
 
-def _graphic_display_dimensions(path: str) -> tuple[int, int]:
-    """Width × height as viewers see the file (EXIF orientation applied when Pillow is available)."""
+def _graphic_display_dimensions(path: str, *, is_video: bool = False) -> tuple[int, int]:
+    """Width × height as viewers see the file (EXIF for images; first video stream for clips)."""
+    if is_video:
+        return _ffprobe_stream_dimensions(path)
     try:
         from PIL import Image, ImageOps
 
@@ -156,6 +158,42 @@ def _graphic_display_dimensions(path: str) -> tuple[int, int]:
 def _video_frame_dimensions(path: str) -> tuple[int, int]:
     """Coded frame size of the first video stream (matches overlay W/H on [vbase])."""
     return _ffprobe_stream_dimensions(path)
+
+
+def _ffprobe_format_duration_sec(path: str) -> float:
+    """Container duration in seconds (best effort)."""
+    cmd = [
+        "ffprobe",
+        "-v",
+        "quiet",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "csv=p=0",
+        path,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0 or not result.stdout.strip():
+            return 0.0
+        return max(0.0, float(result.stdout.strip().split("\n")[0]))
+    except (ValueError, subprocess.SubprocessError, OSError):
+        return 0.0
+
+
+_GRAPHIC_VIDEO_EXTS: frozenset[str] = frozenset({
+    ".mp4",
+    ".m4v",
+    ".webm",
+    ".mov",
+    ".mkv",
+    ".avi",
+})
+
+
+def _is_graphic_video_path(path: str) -> bool:
+    p = path.lower()
+    return any(p.endswith(e) for e in _GRAPHIC_VIDEO_EXTS)
 
 
 def _video_avg_fps(path: str) -> float:
@@ -404,6 +442,130 @@ def _escape_drawtext(text: str) -> str:
     return text
 
 
+def _escape_drawtext_multiline(text: str) -> str:
+    """Escape each line for drawtext; join with \\n for FFmpeg multi-line text."""
+    parts = (text or "").split("\n")
+    return "\\n".join(_escape_drawtext(p) for p in parts)
+
+
+def _wrap_caption_text_fallback(text: str, max_width_px: int, font_size: int) -> str:
+    """Character-budget word wrap when font metrics are unavailable."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    avg = max(float(font_size) * 0.55, 6.0)
+    cpl = max(6, int(max_width_px / avg))
+    words = raw.split()
+    if not words:
+        return raw
+
+    def break_token(tok: str) -> list[str]:
+        if len(tok) <= cpl:
+            return [tok]
+        return [tok[i : i + cpl] for i in range(0, len(tok), cpl)]
+
+    lines: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for w in words:
+        for piece in break_token(w):
+            add_len = len(piece) + (1 if cur else 0)
+            if cur and cur_len + add_len > cpl:
+                lines.append(" ".join(cur))
+                cur = [piece]
+                cur_len = len(piece)
+            else:
+                cur.append(piece)
+                cur_len += add_len
+    if cur:
+        lines.append(" ".join(cur))
+    return "\n".join(lines) if lines else raw
+
+
+def wrap_caption_line_to_width(
+    text: str,
+    max_width_px: int,
+    font_size: int,
+    bold: bool = False,
+) -> str:
+    """Wrap a single caption string to fit max_width_px using Pillow when possible."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    max_w = max(40, int(max_width_px))
+    fs = max(8, min(int(font_size), 120))
+    font_path = _resolve_drawtext_fontfile(bold=bold)
+    if font_path and os.path.isfile(font_path):
+        try:
+            from PIL import ImageFont
+
+            font = ImageFont.truetype(font_path, size=fs)
+            words = raw.split()
+            if not words:
+                return raw
+            lines: list[str] = []
+            cur: list[str] = []
+            for w in words:
+                trial = " ".join(cur + [w]) if cur else w
+                try:
+                    wd = float(font.getlength(trial))
+                except Exception:
+                    wd = float(len(trial)) * fs * 0.55
+                if cur and wd > max_w:
+                    lines.append(" ".join(cur))
+                    cur = [w]
+                else:
+                    cur.append(w)
+            if cur:
+                lines.append(" ".join(cur))
+            return "\n".join(lines) if lines else raw
+        except Exception:
+            pass
+    return _wrap_caption_text_fallback(raw, max_w, fs)
+
+
+def wrap_caption_chunks_for_frame(
+    chunks: list[dict[str, Any]],
+    frame_width: int,
+    cap_margin: int,
+    caption_font_size: int,
+    caption_bold: bool,
+) -> list[dict[str, Any]]:
+    """Return new caption chunks with wrapped text (newlines) for drawtext."""
+    inner = max(0, int(frame_width) - 2 * max(0, int(cap_margin)))
+    # Pillow metrics can be slightly narrower than libfreetype in FFmpeg; stay inside the frame.
+    max_w = max(80, int(inner * 0.88))
+    out: list[dict[str, Any]] = []
+    for c in chunks:
+        t = str(c.get("text", "") or "")
+        wrapped = wrap_caption_line_to_width(t, max_w, caption_font_size, caption_bold)
+        out.append({**c, "text": wrapped})
+    return out
+
+
+def output_cropped_dimensions(
+    video_path: str,
+    output_aspect_ratio: str,
+    *,
+    fallback_wh: tuple[int, int] = (1280, 720),
+) -> tuple[int, int]:
+    """Width × height after center-crop to output aspect (matches export)."""
+    if not video_path or not os.path.isfile(video_path):
+        return fallback_wh
+    try:
+        main_w, main_h = _video_frame_dimensions(video_path)
+    except Exception:
+        return fallback_wh
+    aspect_key = str(output_aspect_ratio or "original").strip().lower()
+    crop_f = _center_crop_filter(main_w, main_h, aspect_key)
+    cw, ch = main_w, main_h
+    if crop_f:
+        m = re.match(r"crop=(\d+):(\d+):(\d+):(\d+)", crop_f)
+        if m:
+            cw, ch = int(m.group(1)), int(m.group(2))
+    return cw, ch
+
+
 def _hex_to_fontcolor(value: str) -> str:
     h = value.strip().lstrip("#")
     if len(h) == 6 and all(c in "0123456789abcdefABCDEF" for c in h):
@@ -494,10 +656,143 @@ def _caption_alpha_expr(start: float, end: float, fade_in: float, fade_out: floa
     return core
 
 
-def _caption_y_expr(position: str, margin: int) -> str:
+def _caption_bottom_pad_px(margin: int, border_w: int) -> int:
+    """Extra space so outline + descenders are not clipped at the frame edge."""
+    return int(margin) + max(0, int(border_w)) + 8
+
+
+def _caption_y_expr(position: str, margin: int, border_w: int = 0) -> str:
+    """Vertical anchor for single-line or FFmpeg multiline drawtext.
+
+    Bottom must use ``text_h`` (full block height). Some FFmpeg builds expose
+    ``th`` that does not include all lines, which pushes multi-line captions off
+    the bottom and clips them.
+    """
     if position == "center":
         return "(h-text_h)/2"
-    return f"h-th-{margin}"
+    pad = _caption_bottom_pad_px(margin, border_w)
+    return f"h-text_h-{pad}"
+
+
+def _caption_y_expr_stacked_line(
+    position: str,
+    line_index: int,
+    num_lines: int,
+    fontsize: int,
+    line_spacing: int,
+    margin: int,
+    border_w: int,
+) -> str:
+    """Y expression for one line when using separate drawtext filters per line."""
+    lh = max(1, int(fontsize) + int(line_spacing))
+    n = max(1, int(num_lines))
+    i = int(line_index)
+    if position == "center":
+        total_h = (n - 1) * lh + int(fontsize) + 10
+        return f"(h-{total_h})/2+{i}*{lh}"
+    pad = _caption_bottom_pad_px(margin, border_w)
+    # Line 0 is top; line n-1 is bottom (closest to lower edge).
+    return f"h-{pad}-{fontsize}-{(n - 1 - i)}*{lh}"
+
+
+def _append_caption_drawtext_clauses(
+    caption_filter_clauses: list[str],
+    chunk: dict[str, Any],
+    *,
+    font_prefix: str,
+    caption_font_size: int,
+    font_color: str,
+    border_color: str,
+    caption_border_width: int,
+    line_spacing: int,
+    caption_position: str,
+    cap_margin: int,
+    caption_box: bool,
+    caption_fade_in_sec: float,
+    caption_fade_out_sec: float,
+) -> None:
+    raw = str(chunk.get("text", "") or "")
+    lines = raw.split("\n") if raw else [""]
+    visible = [ln for ln in lines if ln.strip() != ""]
+    if not visible:
+        return
+
+    alpha_part = ""
+    if caption_fade_in_sec > 0.001 or caption_fade_out_sec > 0.001:
+        ae = _caption_alpha_expr(
+            float(chunk["start"]),
+            float(chunk["end"]),
+            caption_fade_in_sec,
+            caption_fade_out_sec,
+        )
+        alpha_part = f":alpha='{ae}'"
+
+    enable = f":enable='between(t\\,{float(chunk['start']):.3f}\\,{float(chunk['end']):.3f})'"
+    n = len(visible)
+    use_stacked = n > 1
+    single_text = visible[0] if n == 1 else ""
+
+    def one_clause(escaped_text: str, y_expr: str, line_spacing_part: str, box_part: str) -> None:
+        caption_filter_clauses.append(
+            f"drawtext={font_prefix}text='{escaped_text}'"
+            f":fontsize={caption_font_size}"
+            f":fontcolor={font_color}"
+            f":borderw={caption_border_width}"
+            f":bordercolor={border_color}"
+            f"{line_spacing_part}"
+            f":x=(w-text_w)/2"
+            f":y={y_expr}"
+            f"{alpha_part}"
+            f"{box_part}"
+            f"{enable}"
+        )
+
+    if use_stacked:
+        for i, line in enumerate(visible):
+            y_expr = _caption_y_expr_stacked_line(
+                caption_position,
+                i,
+                n,
+                caption_font_size,
+                line_spacing,
+                cap_margin,
+                caption_border_width,
+            )
+            one_clause(_escape_drawtext(line), y_expr, "", "")
+    else:
+        ls_part = f":line_spacing={line_spacing}"
+        box_part = (
+            ":box=1:boxcolor=black@0.55:boxborderw=14" if caption_box else ""
+        )
+        y_expr = _caption_y_expr(
+            caption_position, cap_margin, caption_border_width
+        )
+        one_clause(
+            _escape_drawtext_multiline(single_text), y_expr, ls_part, box_part
+        )
+
+
+_GRAPHIC_MOTIONS: frozenset[str] = frozenset({
+    "none",
+    "slide_in",
+    "slide_right",
+    "slide_left",
+    "slide_up",
+    "slide_down",
+    "scale_in",
+})
+
+
+def normalize_graphic_motion(motion: str, default: str) -> str:
+    mo = str(motion or "").strip().lower()
+    if mo == "slide_right":
+        mo = "slide_in"
+    if mo not in _GRAPHIC_MOTIONS:
+        d = str(default or "none").strip().lower()
+        if d == "slide_right":
+            d = "slide_in"
+        mo = d if d in _GRAPHIC_MOTIONS else "none"
+    return mo
 
 
 def _graphic_overlay_expressions(
@@ -522,12 +817,33 @@ def _graphic_overlay_expressions(
     gs, ge = g_start, g_end
     dur = max(0.01, ge - gs)
     ai = min(max(0.0, anim_in_sec), dur * 0.49)
-    if motion == "slide_in" and ai > 0.001:
+    mo = normalize_graphic_motion(motion, "none")
+    if mo == "scale_in":
+        return xb, yb
+    if mo == "slide_in" and ai > 0.001:
         xv = (
             f"if(between(t\\,{gs:.3f}\\,{gs + ai:.3f})\\,"
             f"W+((W-w)/2-W)*((t-{gs:.3f})/{ai:.3f})\\,{xb})"
         )
         return xv, yb
+    if mo == "slide_left" and ai > 0.001:
+        xv = (
+            f"if(between(t\\,{gs:.3f}\\,{gs + ai:.3f})\\,"
+            f"-w+((W-w)/2+w)*((t-{gs:.3f})/{ai:.3f})\\,{xb})"
+        )
+        return xv, yb
+    if mo == "slide_up" and ai > 0.001:
+        yv = (
+            f"if(between(t\\,{gs:.3f}\\,{gs + ai:.3f})\\,"
+            f"H+((H-h)/2-H)*((t-{gs:.3f})/{ai:.3f})\\,{yb})"
+        )
+        return xb, yv
+    if mo == "slide_down" and ai > 0.001:
+        yv = (
+            f"if(between(t\\,{gs:.3f}\\,{gs + ai:.3f})\\,"
+            f"-h+((H-h)/2+h)*((t-{gs:.3f})/{ai:.3f})\\,{yb})"
+        )
+        return xb, yv
     return xb, yb
 
 
@@ -805,7 +1121,6 @@ def render_full(
     keep_segments: list[dict[str, float]],
     events: list[dict[str, Any]],
     max_words: int = 3,
-    graphic_display_sec: float = 2.0,
     graphic_width_frac: float = 0.85,
     caption_font_size: int = 24,
     caption_font_color_hex: str = "FFFFFF",
@@ -844,27 +1159,28 @@ def render_full(
     caption_chunks = build_caption_chunks(segments, max_words)
     caption_chunks = remap_caption_chunks(caption_chunks, keep_segments)
 
-    gm_default = str(graphic_motion or "none").strip().lower()
-    if gm_default not in ("slide_in", "none"):
-        gm_default = "none"
+    gm_default = normalize_graphic_motion(str(graphic_motion or "none"), "none")
 
     graphic_inputs: list[dict[str, Any]] = []
-    cap_sec = max(0.2, min(float(graphic_display_sec), 60.0))
     for m in matches:
         fp = m.get("graphic", "")
         if fp and os.path.isfile(fp) and m.get("similarity", 0) >= 0.1:
             g_start = float(m["matched_segment_start"])
             g_end_src = float(m.get("matched_segment_end", g_start + 3.0))
-            span = min(max(0.0, g_end_src - g_start), cap_sec)
-            g_end = g_start + span
+            span = max(0.0, g_end_src - g_start)
+            g_end = g_start + (span if span >= 0.05 else 0.2)
             r0 = remap_interval(g_start, g_end, keep_segments)
             if r0:
+                is_vid = _is_graphic_video_path(str(fp))
+                clip_d = _ffprobe_format_duration_sec(str(fp)) if is_vid else 0.0
                 graphic_inputs.append({
                     "filePath": fp,
                     "start": r0[0],
                     "end": r0[1],
                     "motion": gm_default,
                     "anim_in_sec": float(graphic_anim_in_sec),
+                    "isVideo": is_vid,
+                    "clipDurationSec": float(clip_d),
                 })
 
     sfx_plays = collect_sfx_plays(
@@ -885,7 +1201,7 @@ def render_full(
         if fc:
             cx, cy = fc
         out_dur = _output_duration_sec(keep_segments)
-        giv = graphic_overlay_intervals_output(matches, keep_segments, graphic_display_sec)
+        giv = graphic_overlay_intervals_output(matches, keep_segments)
         zoom_windows = compute_zoom_windows_output(
             out_dur,
             max(0.5, float(face_zoom_interval_sec)),
@@ -1020,6 +1336,16 @@ def _run_render(
         if m:
             cw, ch = int(m.group(1)), int(m.group(2))
 
+    cap_margin = 48
+    caption_chunks = wrap_caption_chunks_for_frame(
+        caption_chunks,
+        cw,
+        cap_margin,
+        caption_font_size,
+        caption_bold,
+    )
+    line_spacing = max(2, int(round(caption_font_size * 0.22)))
+
     vf_inner_parts = [
         f"select='{between_clauses}'",
         "setpts=N/FRAME_RATE/TB",
@@ -1042,34 +1368,23 @@ def _run_render(
     font_cwd, font_prefix = _drawtext_fontfile_prefix(bold=caption_bold)
     font_color = _hex_to_fontcolor(caption_font_color_hex)
     border_color = _hex_to_fontcolor(caption_outline_color_hex)
-    cap_margin = 48
 
     caption_filter_clauses: list[str] = []
     for chunk in caption_chunks:
-        escaped = _escape_drawtext(chunk["text"])
-        alpha_part = ""
-        if caption_fade_in_sec > 0.001 or caption_fade_out_sec > 0.001:
-            ae = _caption_alpha_expr(
-                float(chunk["start"]),
-                float(chunk["end"]),
-                caption_fade_in_sec,
-                caption_fade_out_sec,
-            )
-            alpha_part = f":alpha='{ae}'"
-        box_part = ""
-        if caption_box:
-            box_part = ":box=1:boxcolor=black@0.55:boxborderw=14"
-        caption_filter_clauses.append(
-            f"drawtext={font_prefix}text='{escaped}'"
-            f":fontsize={caption_font_size}"
-            f":fontcolor={font_color}"
-            f":borderw={caption_border_width}"
-            f":bordercolor={border_color}"
-            f":x=(w-text_w)/2"
-            f":y={_caption_y_expr(caption_position, cap_margin)}"
-            f"{alpha_part}"
-            f"{box_part}"
-            f":enable='between(t\\,{chunk['start']:.3f}\\,{chunk['end']:.3f})'"
+        _append_caption_drawtext_clauses(
+            caption_filter_clauses,
+            chunk,
+            font_prefix=font_prefix,
+            caption_font_size=caption_font_size,
+            font_color=font_color,
+            border_color=border_color,
+            caption_border_width=caption_border_width,
+            line_spacing=line_spacing,
+            caption_position=caption_position,
+            cap_margin=cap_margin,
+            caption_box=caption_box,
+            caption_fade_in_sec=caption_fade_in_sec,
+            caption_fade_out_sec=caption_fade_out_sec,
         )
 
     vf_base = ",".join(vf_inner_parts)
@@ -1097,7 +1412,10 @@ def _run_render(
     else:
         next_idx = 1
         for g in graphic_inputs:
-            inputs.extend(["-loop", "1", "-framerate", "30", "-i", g["filePath"]])
+            if bool(g.get("isVideo")):
+                inputs.extend(["-i", g["filePath"]])
+            else:
+                inputs.extend(["-loop", "1", "-framerate", "30", "-i", g["filePath"]])
             next_idx += 1
 
         af_main = f"[0:a]{af_select}[mainaud]"
@@ -1120,19 +1438,16 @@ def _run_render(
             enable = f"between(t\\,{g['start']:.3f}\\,{g['end']:.3f})"
             out_lab = f"vo{i}"
             vb = f"vb{i}"
-            gi = f"gi{i}"
             gs = f"gs{i}"
             gss = f"gss{i}"
             try:
-                gw, gh = _graphic_display_dimensions(g["filePath"])
+                gw, gh = _graphic_display_dimensions(g["filePath"], is_video=bool(g.get("isVideo")))
                 ow, oh = _overlay_dims_uniform(cw, ch, gw, gh, graphic_width_frac)
             except Exception as exc:
                 raise RuntimeError(
                     f"Could not size graphic overlay for {g['filePath']!r}: {exc}"
                 ) from exc
-            mo = str(g.get("motion", "") or "none")
-            if mo not in ("slide_in", "none"):
-                mo = graphic_motion_default
+            mo = normalize_graphic_motion(str(g.get("motion", "") or ""), graphic_motion_default)
             ain = float(g.get("anim_in_sec", graphic_anim_in_sec))
             ox, oy = _graphic_overlay_expressions(
                 graphic_position,
@@ -1142,6 +1457,39 @@ def _run_render(
                 ain,
             )
             gs0 = f"gss0{i}"
+            vsrc = f"vsrc{i}"
+            g_timed = vsrc
+            gs_anim = float(g["start"])
+            d_overlay = max(0.01, float(g["end"]) - float(g["start"]))
+            is_vid = bool(g.get("isVideo"))
+            if is_vid:
+                clip_sec = max(0.0, float(g.get("clipDurationSec") or 0.0))
+                if clip_sec < 0.05:
+                    clip_sec = d_overlay
+                if clip_sec + 1e-3 < d_overlay:
+                    pad = d_overlay - clip_sec
+                    media_prefix = (
+                        f";[{inp_idx}:v]setpts=PTS-STARTPTS,trim=duration={clip_sec:.4f},"
+                        f"tpad=stop_mode=clone:stop_duration={pad:.4f},setsar=1[{vsrc}]"
+                    )
+                else:
+                    media_prefix = (
+                        f";[{inp_idx}:v]setpts=PTS-STARTPTS,trim=duration={d_overlay:.4f},"
+                        f"setsar=1[{vsrc}]"
+                    )
+            else:
+                media_prefix = f";[{inp_idx}:v]setsar=1[{vsrc}]"
+            scale_in_prefix = ""
+            if mo == "scale_in" and ain > 0.001:
+                g_scaled = f"gscl{i}"
+                scale_in_prefix = (
+                    f"{media_prefix}"
+                    f";[{vsrc}]scale=w='max(2\\,floor(iw*min(1\\,(t-{gs_anim:.3f})/{ain:.3f})))'"
+                    f":h=-2:flags=bilinear:force_original_aspect_ratio=decrease:eval=frame[{g_scaled}]"
+                )
+                g_timed = g_scaled
+            else:
+                scale_in_prefix = media_prefix
             gf_in = max(0.0, float(graphic_fade_in_sec))
             gf_out = max(0.0, float(graphic_fade_out_sec))
             if gf_in > 0.001 or gf_out > 0.001:
@@ -1152,8 +1500,8 @@ def _run_render(
                     gf_out,
                 )
                 fc_video += (
-                    f";[{inp_idx}:v]setsar=1[{gi}]"
-                    f";[{gi}][{current}]scale2ref=w={ow}:h={oh}:force_original_aspect_ratio=disable"
+                    f"{scale_in_prefix}"
+                    f";[{g_timed}][{current}]scale2ref=w={ow}:h={oh}:force_original_aspect_ratio=disable"
                     f"[{gs}][{vb}]"
                     f";[{gs}]setsar=1[{gs0}];[{gs0}]{fade_chain}[{gss}]"
                     f";[{vb}][{gss}]overlay="
@@ -1164,8 +1512,8 @@ def _run_render(
                 )
             else:
                 fc_video += (
-                    f";[{inp_idx}:v]setsar=1[{gi}]"
-                    f";[{gi}][{current}]scale2ref=w={ow}:h={oh}:force_original_aspect_ratio=disable"
+                    f"{scale_in_prefix}"
+                    f";[{g_timed}][{current}]scale2ref=w={ow}:h={oh}:force_original_aspect_ratio=disable"
                     f"[{gs}][{vb}]"
                     f";[{gs}]setsar=1[{gss}]"
                     f";[{vb}][{gss}]overlay="

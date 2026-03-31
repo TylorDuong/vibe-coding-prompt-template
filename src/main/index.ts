@@ -28,7 +28,16 @@ function localFileRequestToFsPath(requestUrl: string): string {
   } catch {
     /* fall through */
   }
-  return decodeURIComponent(requestUrl.replace(/^local-file:\/\/?/i, ''))
+  let fb = decodeURIComponent(
+    requestUrl.replace(/^local-file:\/\/?/i, '').replace(/\+/g, ' '),
+  )
+  if (process.platform === 'win32') {
+    if (fb.startsWith('/') && /^\/[A-Za-z]:/.test(fb)) {
+      fb = fb.slice(1)
+    }
+    fb = fb.replace(/\//g, '\\')
+  }
+  return fb
 }
 
 function mimeForPath(filePath: string): string {
