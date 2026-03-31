@@ -84,6 +84,15 @@ export type PipelineConfig = {
   videoSpeed: number
 }
 
+export type PipelinePreviewMeta = {
+  outputDurationSec: number
+  captionChunks: Array<{ text: string; start: number; end: number }>
+  graphicIntervalsOutput: Array<{ start: number; end: number }>
+  faceCenter: { x: number; y: number } | null
+  faceZoomWindows: Array<{ start: number; end: number }>
+  faceZoomStrengthPreview: number
+}
+
 export type PipelineResult = {
   video: Record<string, unknown> | null
   segments: Record<string, unknown>[]
@@ -94,6 +103,7 @@ export type PipelineResult = {
   silenceThresholdMs: number
   /** Kept spans on the source timeline (for mapping to export time) */
   keepSegments?: KeepSegment[]
+  preview?: PipelinePreviewMeta
 }
 
 const STAGE_LABELS: Record<PipelineStage, string> = {
@@ -181,6 +191,12 @@ export function useProcessPipeline() {
           mergeGapMs: config.mergeGapMs,
           minKeepMs: config.minKeepMs,
           attentionLengthMs: config.attentionLengthMs,
+          maxWords: config.maxWords,
+          graphicDisplaySec: config.graphicDisplaySec,
+          faceZoomEnabled: config.faceZoomEnabled,
+          faceZoomIntervalSec: config.faceZoomIntervalSec,
+          faceZoomPulseSec: config.faceZoomPulseSec,
+          faceZoomStrength: config.faceZoomStrength,
           silences,
           totalDuration: videoDuration,
         })) as StageResult

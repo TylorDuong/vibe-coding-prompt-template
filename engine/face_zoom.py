@@ -163,10 +163,18 @@ def build_zoom_active_expression(
     """FFmpeg expr fragment: 1 inside any window, else 0.
 
     Use time_var='t' for drawtext/overlay on the cut timeline; use 'in_time' inside zoompan.
+
+    Implemented as a flat sum of between() terms + gt(sum,0) instead of deeply nested if().
+    Long presets (large pulse_sec × long output) used to build 40+ nested if() calls and
+    could break FFmpeg's expression parser or zoompan, which surfaced as preview encode failure.
     """
     if not windows:
         return "0"
-    expr = "0"
-    for a, b in reversed(windows[:48]):
-        expr = f"if(between({time_var}\\,{a:.3f}\\,{b:.3f})\\,1\\,{expr})"
-    return expr
+    max_windows = 96
+    parts = [
+        f"between({time_var}\\,{a:.3f}\\,{b:.3f})" for a, b in windows[:max_windows]
+    ]
+    if len(parts) == 1:
+        return parts[0]
+    summed = "+".join(parts)
+    return f"gt({summed}\\,0)"

@@ -32,6 +32,13 @@ def test_build_zoom_active_expression_default_uses_t() -> None:
     assert "between(t\\," in expr
 
 
+def test_build_zoom_active_expression_many_windows_is_flat_not_nested_if() -> None:
+    expr = build_zoom_active_expression([(0.0, 1.0), (2.0, 3.0), (4.0, 5.0)])
+    assert "gt(" in expr
+    assert "+" in expr
+    assert "if(" not in expr
+
+
 def test_zoom_windows_skip_graphic_overlap() -> None:
     graphic = [(1.0, 2.0)]
     wins = compute_zoom_windows_output(

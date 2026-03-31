@@ -17,6 +17,8 @@ from engine.render import (
     _center_crop_filter,
     _atempo_segments,
     _chain_audio_atempo,
+    _stderr_time_sec,
+    _ffmpeg_stderr_marks_mux_done,
 )
 
 
@@ -100,6 +102,22 @@ def test_collect_sfx_caption_every_n(tmp_path) -> None:
     keep = [{"start": 0.0, "end": 10.0}]
     plays = collect_sfx_plays(events, {}, assigns, keep, caption_every_n=2, graphic_every_n=1)
     assert len(plays) == 2
+
+
+def test_collect_sfx_caption_every_n_zero_skips(tmp_path) -> None:
+    wav = tmp_path / "x.wav"
+    wav.write_bytes(b"fake")
+    events = [
+        {"type": "sfx", "start": 0.0, "trigger": "caption_entry"},
+        {"type": "sfx", "start": 0.5, "trigger": "graphic_entry"},
+    ]
+    assigns = [
+        {"trigger": "caption_entry", "filePath": str(wav), "volume": 1.0},
+        {"trigger": "graphic_entry", "filePath": str(wav), "volume": 1.0},
+    ]
+    keep = [{"start": 0.0, "end": 10.0}]
+    assert len(collect_sfx_plays(events, {}, assigns, keep, caption_every_n=0, graphic_every_n=1)) == 1
+    assert len(collect_sfx_plays(events, {}, assigns, keep, caption_every_n=1, graphic_every_n=0)) == 1
 
 
 @pytest.fixture(scope="module")
@@ -349,3 +367,22 @@ def test_render_full_graphic_fade_in_filter(test_video_with_audio: str, tmp_path
     finally:
         if os.path.exists(out.name):
             os.unlink(out.name)
+
+
+def test_stderr_time_sec_out_time_ms() -> None:
+    assert abs((_stderr_time_sec("frame=1 out_time_ms=5000") or 0) - 5.0) < 0.001
+
+
+def test_stderr_time_sec_integer_microseconds() -> None:
+    assert abs((_stderr_time_sec("progress out_time=2500000 dup=0 drop=0") or 0) - 2.5) < 0.001
+
+
+def test_stderr_time_sec_prefers_hhmmss_time_field() -> None:
+    t = _stderr_time_sec("frame=1 time=00:00:07.50 speed=1.2x")
+    assert t is not None and abs(t - 7.5) < 0.01
+
+
+def test_ffmpeg_stderr_mux_done_lsize_case_insensitive() -> None:
+    assert _ffmpeg_stderr_marks_mux_done("lsize=   12345KiB time=00:00:01.00 bitrate=1")
+    assert _ffmpeg_stderr_marks_mux_done("Lsize=   12345KiB time=00:00:01.00 bitrate=1")
+    assert _ffmpeg_stderr_marks_mux_done("video:123kB audio:45kB subtitle:0kB muxing overhead: 0.1%")

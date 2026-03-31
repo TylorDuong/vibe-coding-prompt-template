@@ -1,5 +1,9 @@
 import type { OutputAspectRatio, PipelineConfig } from '../hooks/useProcessPipeline'
-import { parsePipelinePresetJson, serializePipelinePreset } from '../lib/pipelineConfigPreset'
+import type { SfxSlot } from './SfxPoolPanel'
+import {
+  parsePipelinePresetJson,
+  serializeSplittyPreset,
+} from '../lib/pipelineConfigPreset'
 
 type OpenPresetResult =
   | { canceled: true }
@@ -17,18 +21,36 @@ function captionPreviewShadow(outlinePx: number, outlineColor: string): string |
   return `${outlinePx}px 0 0 ${c}, -${outlinePx}px 0 0 ${c}, 0 ${outlinePx}px 0 ${c}, 0 -${outlinePx}px 0 ${c}`
 }
 
+const ASPECT_RATIO_CSS: Record<PipelineConfig['outputAspectRatio'], string | undefined> = {
+  original: undefined,
+  '16:9': '16 / 9',
+  '9:16': '9 / 16',
+  '1:1': '1 / 1',
+  '4:5': '4 / 5',
+}
+
 function CaptionStylePreview({ config }: { config: PipelineConfig }): React.JSX.Element {
   const outline = Math.max(0, config.captionBorderWidth)
   const fs = Math.min(Math.max(10, config.captionFontSize * 0.32), 26)
   const isCenter = config.captionPosition === 'center'
   const shadow = captionPreviewShadow(outline, config.captionOutlineColor)
+  const aspectRatio = ASPECT_RATIO_CSS[config.outputAspectRatio]
+  const aspectNote =
+    config.outputAspectRatio === 'original'
+      ? 'Original uses source frame size in export; preview shown as 16:9 sample.'
+      : 'Aspect matches export crop target.'
 
   const frame = (bgClass: string, bgStyle: React.CSSProperties | undefined, label: string) => (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
       <span className="text-[9px] text-zinc-500">{label}</span>
       <div
-        className={`relative aspect-video w-full overflow-hidden rounded-md border border-zinc-700 ${bgClass}`}
-        style={bgStyle}
+        className={`relative w-full overflow-hidden rounded-md border border-zinc-700 ${
+          aspectRatio ? '' : 'aspect-video'
+        } ${bgClass}`}
+        style={{
+          ...bgStyle,
+          ...(aspectRatio ? { aspectRatio } : {}),
+        }}
       >
         <div
           className={`absolute inset-x-0 flex justify-center px-1 ${
@@ -57,7 +79,7 @@ function CaptionStylePreview({ config }: { config: PipelineConfig }): React.JSX.
   return (
     <div className="mt-4">
       <p className="mb-1.5 text-[10px] text-zinc-600">
-        Caption preview (approximate; export uses FFmpeg)
+        Caption preview (approximate; export uses FFmpeg). {aspectNote}
       </p>
       <div className="flex flex-wrap gap-2">
         {frame('bg-white', undefined, 'White')}
@@ -73,6 +95,8 @@ type ConfigPanelProps = {
   onChange: (config: PipelineConfig) => void
   /** Defaults used when merging imported JSON (missing keys). */
   defaultConfig: PipelineConfig
+  sfxSlots: SfxSlot[]
+  onSfxSlotsChange: (slots: SfxSlot[]) => void
   disabled: boolean
   onPresetSuccess?: (message: string) => void
   onPresetError?: (message: string) => void
@@ -201,8 +225,8 @@ const CAPTION_NUM_PARAMS: ParamDef[] = [
   {
     key: 'sfxCaptionEveryN',
     label: 'SFX / caption',
-    tooltip: 'Play caption-triggered SFX on every Nth caption line (1 = every line).',
-    min: 1,
+    tooltip: 'Play caption-triggered SFX on every Nth caption line (1 = every line, 0 = never).',
+    min: 0,
     max: 10,
     step: 1,
     unit: '',
@@ -210,37 +234,10 @@ const CAPTION_NUM_PARAMS: ParamDef[] = [
   {
     key: 'sfxGraphicEveryN',
     label: 'SFX / graphic',
-    tooltip: 'Play graphic-triggered SFX on every Nth graphic (1 = every graphic).',
-    min: 1,
+    tooltip: 'Play graphic-triggered SFX on every Nth graphic (1 = every graphic, 0 = never).',
+    min: 0,
     max: 10,
     step: 1,
-    unit: '',
-  },
-  {
-    key: 'faceZoomIntervalSec',
-    label: 'Face zoom int.',
-    tooltip: 'Seconds between face-zoom pulses on the export timeline (when enabled).',
-    min: 0.5,
-    max: 15,
-    step: 0.5,
-    unit: 's',
-  },
-  {
-    key: 'faceZoomPulseSec',
-    label: 'Face zoom dur.',
-    tooltip: 'How long each zoom pulse lasts.',
-    min: 0.05,
-    max: 2,
-    step: 0.05,
-    unit: 's',
-  },
-  {
-    key: 'faceZoomStrength',
-    label: 'Face zoom amt.',
-    tooltip: 'Extra zoom amount (0.12 ≈ 12% crop). Higher = tighter face frame.',
-    min: 0,
-    max: 0.45,
-    step: 0.02,
     unit: '',
   },
 ]
@@ -327,6 +324,8 @@ export default function ConfigPanel({
   config,
   onChange,
   defaultConfig,
+  sfxSlots,
+  onSfxSlotsChange,
   disabled,
   onPresetSuccess,
   onPresetError,
@@ -357,6 +356,9 @@ export default function ConfigPanel({
         return
       }
       onChange(parsed.config)
+      if (parsed.sfxSlots !== null) {
+        onSfxSlotsChange(parsed.sfxSlots)
+      }
       onPresetSuccess?.('Imported settings from JSON.')
     } catch (err) {
       onPresetError?.(err instanceof Error ? err.message : 'Import failed.')
@@ -365,7 +367,7 @@ export default function ConfigPanel({
 
   const handleExportPreset = async (): Promise<void> => {
     try {
-      const body = serializePipelinePreset(config, 'splitty-ai v0.2.0')
+      const body = serializeSplittyPreset(config, sfxSlots, 'splitty-ai v0.2.0')
       const raw = (await window.electron.invoke('dialog:saveConfigPreset', {
         content: body,
       })) as SavePresetResult
@@ -550,16 +552,6 @@ export default function ConfigPanel({
               className="rounded border-zinc-600"
             />
             Caption background
-          </label>
-          <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={config.faceZoomEnabled}
-              onChange={(e) => update('faceZoomEnabled', e.target.checked)}
-              disabled={disabled}
-              className="rounded border-zinc-600"
-            />
-            Face zoom pulses
           </label>
         </div>
 

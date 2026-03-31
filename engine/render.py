@@ -9,6 +9,7 @@ Builds a single FFmpeg command with filter_complex that:
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
@@ -26,6 +27,45 @@ from engine.face_zoom import (
     graphic_overlay_intervals_output,
     sample_face_center_normalized,
 )
+
+_FFMPEG_CHILDREN: list[subprocess.Popen] = []
+_FFMPEG_CHILDREN_LOCK = threading.Lock()
+
+
+def _register_ffmpeg_proc(proc: subprocess.Popen) -> None:
+    with _FFMPEG_CHILDREN_LOCK:
+        _FFMPEG_CHILDREN.append(proc)
+
+
+def _unregister_ffmpeg_proc(proc: subprocess.Popen) -> None:
+    with _FFMPEG_CHILDREN_LOCK:
+        try:
+            _FFMPEG_CHILDREN.remove(proc)
+        except ValueError:
+            pass
+
+
+def _terminate_all_ffmpeg_children() -> None:
+    with _FFMPEG_CHILDREN_LOCK:
+        procs = list(_FFMPEG_CHILDREN)
+    for p in procs:
+        if p.poll() is None:
+            try:
+                p.terminate()
+            except (OSError, ProcessLookupError):
+                pass
+            try:
+                p.wait(timeout=4)
+            except (subprocess.TimeoutExpired, OSError):
+                try:
+                    p.kill()
+                except (OSError, ProcessLookupError):
+                    pass
+    with _FFMPEG_CHILDREN_LOCK:
+        _FFMPEG_CHILDREN.clear()
+
+
+atexit.register(_terminate_all_ffmpeg_children)
 
 # EXIF orientation (JPEG/HEIC-style); 1 = no rotation.
 _EXIF_ORIENTATION = 274
@@ -148,19 +188,34 @@ def _video_avg_fps(path: str) -> float:
         return 30.0
 
 
-_TIME_RE = re.compile(
-    r"(?:out_time_ms|out_time)=(\d+)|time=(\d+):(\d+):(\d+\.?\d*)",
-)
-
-
 def _stderr_time_sec(line: str) -> float | None:
-    m = _TIME_RE.search(line)
-    if not m:
-        return None
-    if m.group(1) is not None:
+    """Parse FFmpeg progress stderr into output timeline seconds (best effort)."""
+    m = re.search(r"out_time_ms=(\d+)", line)
+    if m:
+        return int(m.group(1)) / 1000.0
+    m = re.search(r"out_time_us=(\d+)", line)
+    if m:
         return int(m.group(1)) / 1_000_000.0
-    h, mm, s = int(m.group(2)), int(m.group(3)), float(m.group(4))
-    return h * 3600 + mm * 60 + s
+    # Prefer HH:MM:SS before bare out_time= digits — out_time=00:00:05 must not parse as 0 us.
+    m = re.search(r"time=(\d+):(\d+):(\d+\.?\d*)", line)
+    if m:
+        h, mm, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
+        return h * 3600 + mm * 60 + s
+    # Integer microseconds only (5+ digits) — avoids matching out_time=00 from timestamps with colons.
+    m = re.search(r"out_time=(\d{5,})\b", line)
+    if m:
+        return int(m.group(1)) / 1_000_000.0
+    return None
+
+
+def _ffmpeg_stderr_marks_mux_done(line: str) -> bool:
+    """True when FFmpeg has finished the encode/mux pass (before process exit)."""
+    lo = line.lower()
+    if "muxing overhead" in lo:
+        return True
+    if "lsize=" in lo:
+        return True
+    return False
 
 
 def _overlay_dims_uniform(
@@ -566,6 +621,10 @@ def collect_sfx_plays(
 
         event_index[tr] += 1
         n = event_index[tr]
+        if tr == "caption_entry" and caption_every_n <= 0:
+            continue
+        if tr == "graphic_entry" and graphic_every_n <= 0:
+            continue
         if tr == "caption_entry" and caption_every_n > 1:
             if (n % caption_every_n) != 0:
                 continue
@@ -660,7 +719,7 @@ def _execute_ffmpeg(
     duration_out_sec: float,
     progress_cb: Callable[[int], None] | None,
 ) -> None:
-    """Run FFmpeg; optional stderr time parse → progress_cb(0..99)."""
+    """Run FFmpeg; optional stderr time parse → progress_cb(0..100)."""
     if not progress_cb or duration_out_sec <= 0.001:
         result = subprocess.run(
             cmd,
@@ -683,6 +742,7 @@ def _execute_ffmpeg(
         cwd=cwd,
         bufsize=1,
     )
+    _register_ffmpeg_proc(proc)
     stderr_chunks: list[str] = []
     last_emitted = -1
 
@@ -692,6 +752,10 @@ def _execute_ffmpeg(
             return
         for line in iter(proc.stderr.readline, ""):
             stderr_chunks.append(line)
+            if _ffmpeg_stderr_marks_mux_done(line):
+                if last_emitted < 100:
+                    last_emitted = 100
+                    progress_cb(100)
             tsec = _stderr_time_sec(line)
             if tsec is None:
                 continue
@@ -702,9 +766,29 @@ def _execute_ffmpeg(
 
     reader = threading.Thread(target=drain_stderr, daemon=True)
     reader.start()
-    proc.wait(timeout=timeout)
-    reader.join(timeout=60)
+    wait_timeout: subprocess.TimeoutExpired | None = None
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        wait_timeout = e
+    finally:
+        _unregister_ffmpeg_proc(proc)
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+            except (OSError, ProcessLookupError):
+                pass
+            try:
+                proc.wait(timeout=3)
+            except (subprocess.TimeoutExpired, OSError):
+                try:
+                    proc.kill()
+                except (OSError, ProcessLookupError):
+                    pass
+    reader.join(timeout=5)
     stderr = "".join(stderr_chunks)
+    if wait_timeout is not None:
+        raise RuntimeError(f"FFmpeg timed out after {timeout}s") from wait_timeout
     if proc.returncode != 0:
         tail = stderr[-800:] if stderr else ""
         raise RuntimeError(f"FFmpeg exited with code {proc.returncode}. {tail}")
@@ -747,6 +831,9 @@ def render_full(
     output_aspect_ratio: str = "original",
     video_speed: float = 1.0,
     progress_callback: Callable[[int], None] | None = None,
+    preview_max_width: int | None = None,
+    preview_crf: int = 28,
+    preview_max_fps: int | None = None,
 ) -> EngineResult:
     """Render the final video with captions, graphics, and SFX overlaid."""
     if not video_path or not os.path.isfile(video_path):
@@ -846,6 +933,9 @@ def render_full(
             output_aspect_ratio=str(output_aspect_ratio or "original"),
             video_speed=float(video_speed),
             progress_callback=progress_callback,
+            preview_scale_max_w=int(preview_max_width) if preview_max_width else 0,
+            preview_crf=int(preview_crf),
+            preview_max_fps=int(preview_max_fps) if preview_max_fps else 0,
         )
     except Exception as exc:
         return EngineResult(ok=False, error=f"Full export failed: {exc}")
@@ -899,6 +989,9 @@ def _run_render(
     output_aspect_ratio: str = "original",
     video_speed: float = 1.0,
     progress_callback: Callable[[int], None] | None = None,
+    preview_scale_max_w: int = 0,
+    preview_crf: int = 28,
+    preview_max_fps: int = 0,
 ) -> None:
     """Build and execute the FFmpeg command."""
     between_clauses = "+".join(
@@ -951,6 +1044,7 @@ def _run_render(
     border_color = _hex_to_fontcolor(caption_outline_color_hex)
     cap_margin = 48
 
+    caption_filter_clauses: list[str] = []
     for chunk in caption_chunks:
         escaped = _escape_drawtext(chunk["text"])
         alpha_part = ""
@@ -965,7 +1059,7 @@ def _run_render(
         box_part = ""
         if caption_box:
             box_part = ":box=1:boxcolor=black@0.55:boxborderw=14"
-        vf_inner_parts.append(
+        caption_filter_clauses.append(
             f"drawtext={font_prefix}text='{escaped}'"
             f":fontsize={caption_font_size}"
             f":fontcolor={font_color}"
@@ -977,7 +1071,11 @@ def _run_render(
             f"{box_part}"
             f":enable='between(t\\,{chunk['start']:.3f}\\,{chunk['end']:.3f})'"
         )
-    vf_inner = ",".join(vf_inner_parts)
+
+    vf_base = ",".join(vf_inner_parts)
+    vf_inner = vf_base
+    if caption_filter_clauses:
+        vf_inner = f"{vf_base},{','.join(caption_filter_clauses)}"
     vf_speed_suffix = f",setpts=PTS/{speed}" if abs(speed - 1.0) >= 1e-6 else ""
 
     af_select = f"aselect='{between_clauses}',asetpts=N/SR/TB"
@@ -1011,8 +1109,12 @@ def _run_render(
         )
         inputs.extend(sfx_argv)
 
-        fc_video = f"[0:v]{vf_inner}[vbase]"
-        current = "vbase"
+        if graphic_inputs:
+            fc_video = f"[0:v]{vf_base}[vbase]"
+            current = "vbase"
+        else:
+            fc_video = f"[0:v]{vf_inner}[vbase]"
+            current = "vbase"
         for i, g in enumerate(graphic_inputs):
             inp_idx = 1 + i
             enable = f"between(t\\,{g['start']:.3f}\\,{g['end']:.3f})"
@@ -1074,6 +1176,12 @@ def _run_render(
                 )
             current = out_lab
 
+        if graphic_inputs and caption_filter_clauses:
+            for i, cf in enumerate(caption_filter_clauses):
+                nxt = f"vcap{i}"
+                fc_video += f";[{current}]{cf}[{nxt}]"
+                current = nxt
+
         audio_fc = [af_main] + sfx_audio_parts
         filter_complex = ";".join([fc_video] + audio_fc)
         if abs(speed - 1.0) >= 1e-6:
@@ -1092,17 +1200,75 @@ def _run_render(
         if graphic_inputs:
             extra_args.append("-shortest")
 
+    preview_w = max(0, int(preview_scale_max_w or 0))
+    preview_fps = max(0, int(preview_max_fps or 0))
+    if preview_w > 0:
+        vin = map_video.strip("[]")
+        scaled = "vprvlow"
+        if preview_fps > 0:
+            fps_part = f"fps={preview_fps},"
+        else:
+            fps_part = ""
+        # Cap both axes. Width-only scale (w=min, h=-2) lets portrait / 9:16 frames become
+        # extremely tall; some decoders fail and filter graphs edge-case. Fit inside preview_w × preview_h_cap.
+        preview_h_cap = max(preview_w, int(round(preview_w * 16 / 9)))
+        filter_complex += (
+            f";[{vin}]{fps_part}scale=w=min(iw\\,{preview_w}):h=min(ih\\,{preview_h_cap}):"
+            f"flags=bilinear:force_original_aspect_ratio=decrease,format=yuv420p[{scaled}]"
+        )
+        map_video = f"[{scaled}]"
+
     script_path = _write_temp_filter_complex_script(filter_complex)
     try:
+        out_codec: list[str] = []
+        if preview_w > 0:
+            crf = max(18, min(35, int(preview_crf)))
+            if preview_fps > 0:
+                gop = max(6, min(72, preview_fps * 2))
+            else:
+                gop = 48
+            out_codec.extend(
+                [
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-profile:v",
+                    "main",
+                    "-crf",
+                    str(crf),
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-g",
+                    str(gop),
+                    "-bf",
+                    "0",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "128k",
+                    "-movflags",
+                    "+faststart",
+                ]
+            )
+        dur_out = _output_duration_sec(keep_segments)
+        dur_progress = dur_out / speed if abs(speed - 1.0) >= 1e-6 else dur_out
+
+        output_tail: list[str] = [output_path]
+        if preview_w > 0:
+            # Preview only: hard-cap mux length so a bad/stuck filter graph cannot encode forever.
+            # Small slack beyond nominal output length for A/V tail and rounding.
+            t_cap = max(0.25, float(dur_progress) + 3.0)
+            output_tail = ["-t", f"{t_cap:.3f}", output_path]
+
         cmd: list[str] = (
             ["ffmpeg", "-y"]
             + inputs
             + ["-filter_complex_script", script_path, "-map", map_video, "-map", map_audio]
             + extra_args
-            + [output_path]
+            + out_codec
+            + output_tail
         )
-        dur_out = _output_duration_sec(keep_segments)
-        dur_progress = dur_out / speed if abs(speed - 1.0) >= 1e-6 else dur_out
         _execute_ffmpeg(
             cmd,
             cwd=font_cwd,

@@ -30,13 +30,54 @@ export type TimelineDataLike = {
   eventCounts?: Record<string, number>
 }
 
-function countEventTypes(events: TimelineEvent[]): Record<string, number> {
+export function countTimelineEventTypes(events: TimelineEvent[]): Record<string, number> {
   const counts: Record<string, number> = {}
   for (const e of events) {
     const t = e.type ?? 'unknown'
     counts[t] = (counts[t] ?? 0) + 1
   }
   return counts
+}
+
+/**
+ * Drop caption/graphic SFX markers that would not play in export (mirrors engine/render collect_sfx_plays).
+ */
+export function filterTimelineSfxForDisplay(
+  events: TimelineEvent[],
+  sfxCaptionEveryN: number,
+  sfxGraphicEveryN: number,
+): TimelineEvent[] {
+  const capN = sfxCaptionEveryN
+  const gfxN = sfxGraphicEveryN
+  const idx: Record<string, number> = {}
+  const out: TimelineEvent[] = []
+  for (const e of events) {
+    if (e.type !== 'sfx') {
+      out.push(e)
+      continue
+    }
+    const tr = typeof e.trigger === 'string' ? e.trigger : ''
+    if (tr !== 'caption_entry' && tr !== 'graphic_entry') {
+      out.push(e)
+      continue
+    }
+    idx[tr] = (idx[tr] ?? 0) + 1
+    const n = idx[tr]
+    if (tr === 'caption_entry' && capN <= 0) {
+      continue
+    }
+    if (tr === 'graphic_entry' && gfxN <= 0) {
+      continue
+    }
+    if (tr === 'caption_entry' && capN > 1 && n % capN !== 0) {
+      continue
+    }
+    if (tr === 'graphic_entry' && gfxN > 1 && n % gfxN !== 0) {
+      continue
+    }
+    out.push(e)
+  }
+  return out
 }
 
 /** Re-apply attention-gap SFX markers (mirrors engine/polish.py). */
@@ -172,6 +213,6 @@ export function mergeTimelineWithMatches(
     ...base,
     matches: mergedMatches,
     events: withAttention,
-    eventCounts: countEventTypes(withAttention),
+    eventCounts: countTimelineEventTypes(withAttention),
   }
 }

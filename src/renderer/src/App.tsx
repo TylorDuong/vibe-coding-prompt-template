@@ -4,6 +4,7 @@ import FileCard from './components/FileCard'
 import ProcessButton from './components/ProcessButton'
 import ProgressBar from './components/ProgressBar'
 import ConfigPanel from './components/ConfigPanel'
+import DynamicCroppingPanel from './components/DynamicCroppingPanel'
 import SfxPoolPanel, {
   buildSfxAssignments,
   buildSfxPool,
@@ -13,11 +14,18 @@ import SfxPoolPanel, {
 import TimelinePreview, { type TimelineData } from './components/TimelinePreview'
 import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
 import ExportVideoButton from './components/ExportVideoButton'
-import { useProcessPipeline, type PipelineConfig } from './hooks/useProcessPipeline'
+import {
+  useProcessPipeline,
+  type PipelineConfig,
+  type PipelinePreviewMeta,
+} from './hooks/useProcessPipeline'
+import { useEncodedPreview } from './hooks/useEncodedPreview'
 import { DEFAULT_PIPELINE_CONFIG } from './lib/pipelineConfigPreset'
 import {
   buildExportMatches,
+  filterTimelineSfxForDisplay,
   mergeTimelineWithMatches,
+  countTimelineEventTypes,
   type WordTrigger,
   type TimelineDataLike,
 } from './lib/graphicPlacements'
@@ -41,6 +49,7 @@ function App(): React.JSX.Element {
   const [sfxSlots, setSfxSlots] = useState<SfxSlot[]>(DEFAULT_SFX_SLOTS)
   const [selectedGraphicId, setSelectedGraphicId] = useState<string | null>(null)
   const [wordTriggers, setWordTriggers] = useState<Record<string, WordTrigger>>({})
+  const [timelineFloating, setTimelineFloating] = useState(false)
   const pipeline = useProcessPipeline()
 
   const exportMatches = useMemo(() => {
@@ -52,6 +61,23 @@ function App(): React.JSX.Element {
       config.graphicDisplaySec,
     )
   }, [pipeline.result, graphics, wordTriggers, config.graphicDisplaySec])
+
+  const sfxPoolExport = useMemo(() => buildSfxPool(sfxSlots), [sfxSlots])
+  const sfxAssignmentsExport = useMemo(() => buildSfxAssignments(sfxSlots), [sfxSlots])
+
+  const pipelineCompleteForPreview =
+    pipeline.progress.stage === 'done' && pipeline.result != null
+
+  const encodedPreview = useEncodedPreview({
+    videoPath: loadedFile?.filePath ?? null,
+    config,
+    pipelineResult: pipeline.result,
+    exportMatches,
+    sfxPool: sfxPoolExport,
+    sfxAssignments: sfxAssignmentsExport,
+    enabled: engineStatus === 'connected' && Boolean(pipeline.result),
+    processComplete: pipelineCompleteForPreview,
+  })
 
   const displayTimeline = useMemo((): TimelineData | null => {
     if (!pipeline.result) return null
@@ -69,13 +95,24 @@ function App(): React.JSX.Element {
       exportMatches,
       config.attentionLengthMs,
     )
+    const eventsForUi = filterTimelineSfxForDisplay(
+      t.events as TimelineData['events'],
+      config.sfxCaptionEveryN,
+      config.sfxGraphicEveryN,
+    )
     return {
       ...base,
       matches: t.matches as TimelineData['matches'],
-      events: t.events as TimelineData['events'],
-      eventCounts: t.eventCounts,
+      events: eventsForUi,
+      eventCounts: countTimelineEventTypes(eventsForUi),
     }
-  }, [pipeline.result, exportMatches, config.attentionLengthMs])
+  }, [
+    pipeline.result,
+    exportMatches,
+    config.attentionLengthMs,
+    config.sfxCaptionEveryN,
+    config.sfxGraphicEveryN,
+  ])
 
   const checkEngine = useCallback(() => {
     setEngineStatus('checking')
@@ -211,7 +248,11 @@ function App(): React.JSX.Element {
       </header>
 
       <main className="flex flex-1 flex-col overflow-hidden">
-        <section className="flex flex-1 flex-col overflow-auto pb-4">
+        <section
+          className={`flex flex-1 flex-col overflow-auto ${
+            timelineFloating && pipeline.result ? 'pb-44' : 'pb-4'
+          }`}
+        >
           {loadedFile ? (
             <>
               <FileCard
@@ -231,6 +272,8 @@ function App(): React.JSX.Element {
                 config={config}
                 onChange={setConfig}
                 defaultConfig={DEFAULT_CONFIG}
+                sfxSlots={sfxSlots}
+                onSfxSlotsChange={setSfxSlots}
                 disabled={isProcessing}
                 onPresetSuccess={(msg) => {
                   setPresetError(null)
@@ -242,9 +285,28 @@ function App(): React.JSX.Element {
                 }}
               />
 
+              <DynamicCroppingPanel config={config} onChange={setConfig} disabled={isProcessing} />
+
               <SfxPoolPanel
                 slots={sfxSlots}
                 onUpdate={handleSfxSlotUpdate}
+                onAddCustom={() => {
+                  setSfxSlots((prev) => [
+                    ...prev,
+                    {
+                      id: `custom-${crypto.randomUUID()}`,
+                      label: 'Custom SFX',
+                      description: 'User-defined sound',
+                      trigger: 'none',
+                      filePath: null,
+                      fileName: null,
+                      volumePercent: 100,
+                    },
+                  ])
+                }}
+                onRemove={(id) => {
+                  setSfxSlots((prev) => prev.filter((s) => s.id !== id))
+                }}
               />
 
               <div className="mx-4 mt-3">
@@ -281,6 +343,19 @@ function App(): React.JSX.Element {
                     selectedGraphicId={selectedGraphicId}
                     wordTriggers={wordTriggers}
                     onWordAssign={handleWordAssign}
+                    pipelineConfig={config}
+                    onFloatingTimelineChange={setTimelineFloating}
+                    encodedPreviewPath={encodedPreview.previewPath}
+                    encodedPreviewState={encodedPreview.state}
+                    encodedPreviewProgress={encodedPreview.progressPercent}
+                    encodedPreviewError={encodedPreview.error}
+                    encodedPreviewQueued={encodedPreview.encodeQueued}
+                    previewMeta={
+                      pipeline.result.preview != null &&
+                      typeof pipeline.result.preview === 'object'
+                        ? (pipeline.result.preview as PipelinePreviewMeta)
+                        : null
+                    }
                     graphicsSidebar={
                       <GraphicsSidebar
                         embedded
@@ -307,15 +382,17 @@ function App(): React.JSX.Element {
               </div>
 
               {pipeline.result && displayTimeline && (
-                <ExportVideoButton
-                  videoPath={loadedFile.filePath}
-                  config={config}
-                  pipelineResult={pipeline.result}
-                  exportMatches={exportMatches}
-                  sfxPool={buildSfxPool(sfxSlots)}
-                  sfxAssignments={buildSfxAssignments(sfxSlots)}
-                  disabled={isProcessing}
-                />
+                <div className={timelineFloating ? 'mb-6' : ''}>
+                  <ExportVideoButton
+                    videoPath={loadedFile.filePath}
+                    config={config}
+                    pipelineResult={pipeline.result}
+                    exportMatches={exportMatches}
+                    sfxPool={sfxPoolExport}
+                    sfxAssignments={sfxAssignmentsExport}
+                    disabled={isProcessing}
+                  />
+                </div>
               )}
             </>
           ) : (

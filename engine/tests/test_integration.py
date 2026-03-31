@@ -86,6 +86,8 @@ def test_full_process_no_graphics(test_video: str) -> None:
     assert "silences" in timeline
     assert "events" in timeline
     assert "eventCounts" in timeline
+    assert "preview" in timeline
+    assert "captionChunks" in timeline["preview"]
 
     assert timeline["video"]["duration"] > 0
     assert len(timeline["silences"]) >= 1

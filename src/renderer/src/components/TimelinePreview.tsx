@@ -1,7 +1,14 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react'
+import { useState, useRef, useEffect, type ReactNode, Fragment } from 'react'
 import TimelineBar from './TimelineBar'
+import PipelineVideoPreview from './PipelineVideoPreview'
+import type { EncodedPreviewState } from '../hooks/useEncodedPreview'
+import type { PipelineConfig, PipelinePreviewMeta } from '../hooks/useProcessPipeline'
 import type { KeepSegment } from '../lib/timelineRemap'
-import { sourceTimeToOutput } from '../lib/timelineRemap'
+import {
+  encodedFileDurationSec,
+  outputTimeToEncodedFileSeconds,
+  sourceTimeToOutput,
+} from '../lib/timelineRemap'
 
 type TimelineSegment = {
   start: number
@@ -56,10 +63,19 @@ type TimelinePreviewProps = {
   selectedGraphicId: string | null
   wordTriggers: Record<string, WordTrigger>
   onWordAssign: (payload: { start: number; end: number; word: string }) => void
+  pipelineConfig: PipelineConfig
+  previewMeta?: PipelinePreviewMeta | null
   /** Source video for optional scrub preview (`local-file://`). */
   videoPath?: string
-  /** Rendered beside the transcript (e.g. graphics list + settings). */
+  /** Graphics panel (full width above transcript when embedded). */
   graphicsSidebar?: ReactNode
+  /** Fires when the timeline bar docks to the viewport bottom (or false when undocked / unmounted). */
+  onFloatingTimelineChange?: (docked: boolean) => void
+  encodedPreviewPath?: string | null
+  encodedPreviewState?: EncodedPreviewState
+  encodedPreviewProgress?: number
+  encodedPreviewError?: string | null
+  encodedPreviewQueued?: boolean
 }
 
 const EVENT_STYLES: Record<string, { bg: string; label: string; color: string }> = {
@@ -112,8 +128,16 @@ export default function TimelinePreview({
   selectedGraphicId,
   wordTriggers,
   onWordAssign,
+  pipelineConfig,
+  previewMeta = null,
   videoPath,
   graphicsSidebar,
+  onFloatingTimelineChange,
+  encodedPreviewPath = null,
+  encodedPreviewState = 'idle',
+  encodedPreviewProgress = 0,
+  encodedPreviewError = null,
+  encodedPreviewQueued = false,
 }: TimelinePreviewProps): React.JSX.Element {
   const silences = timeline.silences ?? []
   const events = timeline.events ?? []
@@ -122,25 +146,109 @@ export default function TimelinePreview({
   const duration = timeline.video?.duration ?? 0
   const hasRemap = keepSegments.length > 0
   const [scrubTime, setScrubTime] = useState(0)
+  const [timelineDocked, setTimelineDocked] = useState(false)
+  /** Bumped when encoded preview `<video>` exposes real duration so seeks re-clamp to measured length. */
+  const [encodedDurationRev, setEncodedDurationRev] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setScrubTime(0)
   }, [duration, videoPath])
 
+  const encodedReady =
+    encodedPreviewState === 'ready' &&
+    typeof encodedPreviewPath === 'string' &&
+    encodedPreviewPath.length > 0
+
   useEffect(() => {
     const v = videoRef.current
-    if (!v || !videoPath) return
+    if (!v) return
+    if (!videoPath && !encodedReady) return
     if (!Number.isFinite(scrubTime) || scrubTime < 0) return
-    const cap = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : duration
-    const t = cap > 0 ? Math.min(scrubTime, cap) : scrubTime
+
+    let t: number
+    if (encodedReady) {
+      const tOut =
+        keepSegments.length > 0 ? sourceTimeToOutput(scrubTime, keepSegments) : scrubTime
+      const tFile = outputTimeToEncodedFileSeconds(tOut, pipelineConfig.videoSpeed)
+      const cap = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0
+      const metaDur =
+        previewMeta != null &&
+        typeof previewMeta.outputDurationSec === 'number' &&
+        previewMeta.outputDurationSec > 0
+          ? previewMeta.outputDurationSec
+          : 0
+      const capMeta =
+        metaDur > 0
+          ? encodedFileDurationSec(metaDur, pipelineConfig.videoSpeed)
+          : Number.POSITIVE_INFINITY
+      /** Stay inside decodable range; real duration is often slightly below theory (esp. after setpts speed-up). */
+      const endSlack = cap > 0 ? 0.06 : 1e-3
+      t =
+        cap > 0
+          ? Math.min(Math.max(0, tFile), Math.max(0, cap - endSlack))
+          : Math.min(Math.max(0, tFile), Math.max(0, capMeta - endSlack))
+    } else {
+      const cap = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : duration
+      t = cap > 0 ? Math.min(scrubTime, cap) : scrubTime
+    }
     if (Math.abs(v.currentTime - t) > 0.04) {
       v.currentTime = t
     }
-  }, [scrubTime, videoPath, duration])
+  }, [
+    scrubTime,
+    videoPath,
+    duration,
+    encodedReady,
+    keepSegments,
+    encodedPreviewPath,
+    pipelineConfig.videoSpeed,
+    previewMeta,
+    encodedDurationRev,
+  ])
+
+  useEffect(() => {
+    onFloatingTimelineChange?.(timelineDocked)
+  }, [timelineDocked, onFloatingTimelineChange])
+
+  useEffect(() => {
+    return () => {
+      onFloatingTimelineChange?.(false)
+    }
+  }, [onFloatingTimelineChange])
+
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el) return
+    // Viewport root so docking works when the main app column scrolls, not only inner overflow.
+    const io = new IntersectionObserver(
+      ([e]) => {
+        setTimelineDocked(!e.isIntersecting)
+      },
+      { threshold: 0, root: null, rootMargin: '0px' },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [duration, videoPath])
+
+  const barProps = {
+    events,
+    duration,
+    scrubTime,
+    onScrubTimeChange: setScrubTime,
+    keepSegments,
+    faceZoomWindows: previewMeta?.faceZoomWindows ?? [],
+    faceZoomEnabled: pipelineConfig.faceZoomEnabled,
+  }
 
   return (
-    <div className="min-h-0 flex-1 space-y-4 overflow-auto rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <Fragment>
+    <div
+      ref={scrollRef}
+      className={`min-h-0 flex-1 space-y-4 overflow-auto rounded-lg border border-zinc-800 bg-zinc-900 p-4 ${timelineDocked ? 'pb-36' : ''}`}
+    >
       <h3 className="text-sm font-medium text-zinc-300">Pipeline Result</h3>
 
       {/* Summary chips */}
@@ -162,34 +270,49 @@ export default function TimelinePreview({
         <span className="rounded bg-amber-900/40 px-2 py-1 text-amber-300">
           {counts.sfx ?? 0} sfx
         </span>
+        {pipelineConfig.faceZoomEnabled &&
+        previewMeta != null &&
+        Array.isArray(previewMeta.faceZoomWindows) &&
+        previewMeta.faceZoomWindows.length > 0 ? (
+          <span className="rounded bg-violet-900/40 px-2 py-1 text-violet-300">
+            {previewMeta.faceZoomWindows.length} zoom pulse
+            {previewMeta.faceZoomWindows.length === 1 ? '' : 's'}
+          </span>
+        ) : null}
       </div>
 
       {/* Visual timeline bar + scrubber */}
-      {duration > 0 && (
-        <TimelineBar
-          events={events}
-          duration={duration}
-          scrubTime={scrubTime}
-          onScrubTimeChange={setScrubTime}
-        />
-      )}
+      {duration > 0 && <TimelineBar {...barProps} />}
 
-      {videoPath && duration > 0 && (
-        <video
-          ref={videoRef}
-          src={`local-file://${encodeURIComponent(videoPath)}`}
-          className="aspect-video w-full rounded border border-zinc-800 bg-black"
-          controls
-          playsInline
-          preload="metadata"
+      {/* Dock timeline to bottom of viewport once this row scrolls out of view */}
+      <div ref={sentinelRef} className="h-px w-full shrink-0 scroll-mt-0" aria-hidden />
+
+      {videoPath && duration > 0 ? (
+        <PipelineVideoPreview
+          videoPath={videoPath}
+          scrubTime={scrubTime}
+          config={pipelineConfig}
+          previewMeta={previewMeta}
+          keepSegments={keepSegments}
+          matches={timeline.matches}
+          videoRef={videoRef}
+          encodedPreviewPath={encodedPreviewPath}
+          encodedPreviewState={encodedPreviewState}
+          encodedPreviewProgress={encodedPreviewProgress}
+          encodedPreviewError={encodedPreviewError}
+          encodedPreviewQueued={encodedPreviewQueued}
           onLoadedMetadata={(e) => {
             const v = e.currentTarget
+            if (encodedReady) return
             if (Number.isFinite(v.duration) && scrubTime > v.duration) {
               setScrubTime(v.duration)
             }
           }}
+          onEncodedDurationKnown={() => {
+            setEncodedDurationRev((r) => r + 1)
+          }}
         />
-      )}
+      ) : null}
 
       {/* Collapsible event list */}
       {events.length > 0 && (
@@ -224,7 +347,10 @@ export default function TimelinePreview({
                     {evt.type === 'caption' && evt.text}
                     {evt.type === 'graphic' &&
                       `${evt.tag || evt.filePath} (${evt.similarity != null && evt.similarity >= 0.99 ? 'manual' : `sim=${evt.similarity?.toFixed(2)}`})`}
-                    {evt.type === 'sfx' && `${evt.sfx} [${evt.trigger}]`}
+                    {evt.type === 'sfx' &&
+                      (evt.sfx != null && String(evt.sfx).length > 0
+                        ? `${evt.sfx} [${evt.trigger ?? ''}]`
+                        : `[${evt.trigger ?? 'sfx'}]`)}
                     {evt.type === 'silence_cut' && evt.end != null && `${evt.start.toFixed(1)}s–${evt.end.toFixed(1)}s removed`}
                   </span>
                 </li>
@@ -234,21 +360,16 @@ export default function TimelinePreview({
         </CollapsibleSection>
       )}
 
-      {/* Transcript (+ optional graphics column) */}
+      {/* Graphics (full width) then transcript */}
       {(timeline.segments.length > 0 || graphicsSidebar) && (
-        <div
-          className={
-            graphicsSidebar
-              ? 'flex flex-col gap-3 border-t border-zinc-800 pt-4 sm:flex-row sm:items-stretch'
-              : ''
-          }
-        >
-          <div className={graphicsSidebar ? 'min-h-0 min-w-0 flex-1' : ''}>
+        <div className="space-y-4 border-t border-zinc-800 pt-4">
+          {graphicsSidebar ? <div className="w-full min-w-0">{graphicsSidebar}</div> : null}
+          <div className="min-h-0 min-w-0 w-full">
             {timeline.segments.length > 0 ? (
               <CollapsibleSection title="Transcript" count={timeline.segments.length} defaultOpen>
                 {!selectedGraphicId && (
                   <p className="mb-2 text-[10px] text-amber-500/90">
-                    Select a graphic in the sidebar, then click a word here to set when it appears.
+                    Select a graphic above, then click a word here to set when it appears.
                   </p>
                 )}
                 <ul className="space-y-2 max-h-[min(320px,40vh)] overflow-auto">
@@ -276,7 +397,7 @@ export default function TimelinePreview({
                                   title={
                                     selectedGraphicId
                                       ? 'Place selected graphic at this word'
-                                      : 'Select a graphic in the sidebar first'
+                                      : 'Select a graphic first'
                                   }
                                   onClick={() =>
                                     onWordAssign({
@@ -321,9 +442,6 @@ export default function TimelinePreview({
               )
             )}
           </div>
-          {graphicsSidebar && (
-            <div className="shrink-0 sm:w-72 sm:max-w-[40%]">{graphicsSidebar}</div>
-          )}
         </div>
       )}
 
@@ -333,6 +451,14 @@ export default function TimelinePreview({
         <span>Attention: {attentionLengthMs}ms</span>
       </div>
     </div>
+    {timelineDocked && duration > 0 ? (
+      <div className="fixed bottom-0 left-0 right-0 z-[500] border-t border-zinc-700 bg-zinc-950/98 px-4 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-8px_32px_rgba(0,0,0,0.55)] backdrop-blur-md">
+        <div className="mx-auto max-w-4xl">
+          <TimelineBar {...barProps} compact />
+        </div>
+      </div>
+    ) : null}
+    </Fragment>
   )
 }
 

@@ -120,7 +120,7 @@ export default function GraphicsSidebar({
     <aside
       className={
         embedded
-          ? 'flex w-72 shrink-0 flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 min-h-0 max-h-[min(78vh,880px)]'
+          ? 'flex w-full min-w-0 flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 min-h-0'
           : 'flex w-72 flex-col border-l border-zinc-800 bg-zinc-950'
       }
     >
@@ -142,7 +142,7 @@ export default function GraphicsSidebar({
         <h3 className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">
           Graphic settings (export)
         </h3>
-        <div className="grid grid-cols-1 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
             Position
             <select

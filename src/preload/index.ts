@@ -8,6 +8,8 @@ export type ElectronAPI = {
   invoke: (channel: string, data?: unknown) => Promise<unknown>
   /** Subscribe to FFmpeg export percent (0–100). Returns an unsubscribe function. */
   onExportProgress: (callback: (payload: ExportProgressPayload) => void) => () => void
+  /** Low-res preview encode progress (0–100). */
+  onPreviewProgress: (callback: (payload: ExportProgressPayload) => void) => () => void
 }
 
 const ALLOWED_CHANNELS = [
@@ -22,6 +24,8 @@ const ALLOWED_CHANNELS = [
   'dialog:openImages',
   'dialog:saveVideo',
   'engine:exportFull',
+  'engine:encodePreview',
+  'preview:discard',
   'dialog:openSfx',
   'dialog:openConfigPreset',
   'dialog:saveConfigPreset',
@@ -36,6 +40,18 @@ const electronAPI: ElectronAPI = {
   },
   onExportProgress: (callback: (payload: ExportProgressPayload) => void) => {
     const channel = 'engine:exportProgress'
+    const handler = (_evt: unknown, payload: ExportProgressPayload) => {
+      if (payload && typeof payload.percent === 'number') {
+        callback({ percent: payload.percent })
+      }
+    }
+    ipcRenderer.on(channel, handler)
+    return () => {
+      ipcRenderer.removeListener(channel, handler)
+    }
+  },
+  onPreviewProgress: (callback: (payload: ExportProgressPayload) => void) => {
+    const channel = 'engine:previewProgress'
     const handler = (_evt: unknown, payload: ExportProgressPayload) => {
       if (payload && typeof payload.percent === 'number') {
         callback({ percent: payload.percent })
