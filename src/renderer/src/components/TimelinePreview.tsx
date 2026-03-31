@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type ReactNode } from 'react'
 import TimelineBar from './TimelineBar'
 import type { KeepSegment } from '../lib/timelineRemap'
 import { sourceTimeToOutput } from '../lib/timelineRemap'
@@ -58,6 +58,8 @@ type TimelinePreviewProps = {
   onWordAssign: (payload: { start: number; end: number; word: string }) => void
   /** Source video for optional scrub preview (`local-file://`). */
   videoPath?: string
+  /** Rendered beside the transcript (e.g. graphics list + settings). */
+  graphicsSidebar?: ReactNode
 }
 
 const EVENT_STYLES: Record<string, { bg: string; label: string; color: string }> = {
@@ -111,6 +113,7 @@ export default function TimelinePreview({
   wordTriggers,
   onWordAssign,
   videoPath,
+  graphicsSidebar,
 }: TimelinePreviewProps): React.JSX.Element {
   const silences = timeline.silences ?? []
   const events = timeline.events ?? []
@@ -231,77 +234,97 @@ export default function TimelinePreview({
         </CollapsibleSection>
       )}
 
-      {/* Collapsible transcript — click words to place selected graphic */}
-      {timeline.segments.length > 0 && (
-        <CollapsibleSection title="Transcript" count={timeline.segments.length} defaultOpen>
-          {!selectedGraphicId && (
-            <p className="mb-2 text-[10px] text-amber-500/90">
-              Select a graphic in the sidebar, then click a word here to set when it appears.
-            </p>
-          )}
-          <ul className="space-y-2 max-h-64 overflow-auto">
-            {timeline.segments.map((seg, i) => {
-              const words = seg.words
-              return (
-                <li
-                  key={i}
-                  className="rounded bg-zinc-800/50 px-3 py-1.5 text-xs leading-relaxed"
-                >
-                  <span className="mb-1 block font-mono text-zinc-500">
-                    {seg.start.toFixed(1)}s–{seg.end.toFixed(1)}s
-                  </span>
-                  {words && words.length > 0 ? (
-                    <span className="text-zinc-300">
-                      {words.map((w, wi) => {
-                        const raw = w.word ?? ''
-                        const display = raw.trim() || '·'
-                        const isLinked = isWordLinked(w.start, raw, wordTriggers)
-                        return (
-                          <button
-                            key={`${i}-${wi}-${w.start}`}
-                            type="button"
-                            disabled={!selectedGraphicId}
-                            title={
-                              selectedGraphicId
-                                ? 'Place selected graphic at this word'
-                                : 'Select a graphic in the sidebar first'
-                            }
-                            onClick={() =>
-                              onWordAssign({
-                                start: w.start,
-                                end: w.end,
-                                word: raw.trim() || display,
-                              })
-                            }
-                            className={`
-                              mx-0.5 inline rounded px-0.5 py-0.5 align-baseline
-                              transition-colors
-                              ${
-                                selectedGraphicId
-                                  ? 'cursor-pointer hover:bg-blue-600/40 hover:text-white'
-                                  : 'cursor-default opacity-80'
-                              }
-                              ${isLinked ? 'bg-emerald-900/50 text-emerald-200' : ''}
-                            `}
-                          >
-                            {display}
-                          </button>
-                        )
-                      })}
-                    </span>
-                  ) : (
-                    <span className="text-zinc-400">
-                      {seg.text}
-                      <span className="mt-1 block text-[10px] text-zinc-600">
-                        No word-level timings in this segment; process again or use a clip with clearer speech.
-                      </span>
-                    </span>
-                  )}
-                </li>
+      {/* Transcript (+ optional graphics column) */}
+      {(timeline.segments.length > 0 || graphicsSidebar) && (
+        <div
+          className={
+            graphicsSidebar
+              ? 'flex flex-col gap-3 border-t border-zinc-800 pt-4 sm:flex-row sm:items-stretch'
+              : ''
+          }
+        >
+          <div className={graphicsSidebar ? 'min-h-0 min-w-0 flex-1' : ''}>
+            {timeline.segments.length > 0 ? (
+              <CollapsibleSection title="Transcript" count={timeline.segments.length} defaultOpen>
+                {!selectedGraphicId && (
+                  <p className="mb-2 text-[10px] text-amber-500/90">
+                    Select a graphic in the sidebar, then click a word here to set when it appears.
+                  </p>
+                )}
+                <ul className="space-y-2 max-h-[min(320px,40vh)] overflow-auto">
+                  {timeline.segments.map((seg, i) => {
+                    const words = seg.words
+                    return (
+                      <li
+                        key={i}
+                        className="rounded bg-zinc-800/50 px-3 py-1.5 text-xs leading-relaxed"
+                      >
+                        <span className="mb-1 block font-mono text-zinc-500">
+                          {seg.start.toFixed(1)}s–{seg.end.toFixed(1)}s
+                        </span>
+                        {words && words.length > 0 ? (
+                          <span className="text-zinc-300">
+                            {words.map((w, wi) => {
+                              const raw = w.word ?? ''
+                              const display = raw.trim() || '·'
+                              const isLinked = isWordLinked(w.start, raw, wordTriggers)
+                              return (
+                                <button
+                                  key={`${i}-${wi}-${w.start}`}
+                                  type="button"
+                                  disabled={!selectedGraphicId}
+                                  title={
+                                    selectedGraphicId
+                                      ? 'Place selected graphic at this word'
+                                      : 'Select a graphic in the sidebar first'
+                                  }
+                                  onClick={() =>
+                                    onWordAssign({
+                                      start: w.start,
+                                      end: w.end,
+                                      word: raw.trim() || display,
+                                    })
+                                  }
+                                  className={`
+                                    mx-0.5 inline rounded px-0.5 py-0.5 align-baseline
+                                    transition-colors
+                                    ${
+                                      selectedGraphicId
+                                        ? 'cursor-pointer hover:bg-blue-600/40 hover:text-white'
+                                        : 'cursor-default opacity-80'
+                                    }
+                                    ${isLinked ? 'bg-emerald-900/50 text-emerald-200' : ''}
+                                  `}
+                                >
+                                  {display}
+                                </button>
+                              )
+                            })}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400">
+                            {seg.text}
+                            <span className="mt-1 block text-[10px] text-zinc-600">
+                              No word-level timings in this segment; process again or use a clip with clearer
+                              speech.
+                            </span>
+                          </span>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </CollapsibleSection>
+            ) : (
+              graphicsSidebar && (
+                <p className="text-xs text-zinc-500">No transcript segments for this file.</p>
               )
-            })}
-          </ul>
-        </CollapsibleSection>
+            )}
+          </div>
+          {graphicsSidebar && (
+            <div className="shrink-0 sm:w-72 sm:max-w-[40%]">{graphicsSidebar}</div>
+          )}
+        </div>
       )}
 
       {/* Config */}

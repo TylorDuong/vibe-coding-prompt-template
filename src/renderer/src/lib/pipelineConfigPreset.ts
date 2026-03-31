@@ -11,6 +11,7 @@ import type {
   CaptionPosition,
   GraphicMotion,
   GraphicPosition,
+  OutputAspectRatio,
   PipelineConfig,
 } from '../hooks/useProcessPipeline'
 
@@ -36,6 +37,7 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   graphicWidthPercent: 85,
   captionFontSize: 28,
   captionFontColor: '#FFFFFF',
+  captionOutlineColor: '#000000',
   captionPosition: 'bottom',
   captionBold: false,
   captionBox: false,
@@ -53,6 +55,8 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   faceZoomIntervalSec: 3,
   faceZoomPulseSec: 0.35,
   faceZoomStrength: 0.12,
+  outputAspectRatio: 'original',
+  videoSpeed: 1,
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -88,6 +92,13 @@ function pickHexColor(raw: unknown, fallback: string): string {
   }
   const h = raw.trim()
   return /^#[0-9A-Fa-f]{6}$/.test(h) ? h.toUpperCase() : fallback
+}
+
+function pickOutputAspectRatio(raw: unknown, fallback: OutputAspectRatio): OutputAspectRatio {
+  const allowed: OutputAspectRatio[] = ['original', '16:9', '9:16', '1:1', '4:5']
+  return typeof raw === 'string' && (allowed as string[]).includes(raw)
+    ? (raw as OutputAspectRatio)
+    : fallback
 }
 
 /**
@@ -161,6 +172,7 @@ export function mergePipelineConfigFromUnknown(
       120,
     ),
     captionFontColor: pickHexColor(g('captionFontColor'), defaults.captionFontColor),
+    captionOutlineColor: pickHexColor(g('captionOutlineColor'), defaults.captionOutlineColor),
     captionPosition: pickCaptionPosition(g('captionPosition')),
     captionBold: typeof g('captionBold') === 'boolean' ? g('captionBold') as boolean : defaults.captionBold,
     captionBox: typeof g('captionBox') === 'boolean' ? g('captionBox') as boolean : defaults.captionBox,
@@ -246,6 +258,12 @@ export function mergePipelineConfigFromUnknown(
         : defaults.faceZoomStrength,
       0,
       0.45,
+    ),
+    outputAspectRatio: pickOutputAspectRatio(g('outputAspectRatio'), defaults.outputAspectRatio),
+    videoSpeed: clamp(
+      typeof g('videoSpeed') === 'number' ? (g('videoSpeed') as number) : defaults.videoSpeed,
+      0.25,
+      4,
     ),
   }
 }

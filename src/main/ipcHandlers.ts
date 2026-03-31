@@ -252,6 +252,10 @@ export function registerIpcHandlers(): void {
           typeof p.captionFontColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(p.captionFontColor)
             ? p.captionFontColor.slice(1).toUpperCase()
             : 'FFFFFF',
+        captionOutlineColor:
+          typeof p.captionOutlineColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(p.captionOutlineColor)
+            ? p.captionOutlineColor.slice(1).toUpperCase()
+            : '000000',
         captionPosition: capPos,
         captionBold: Boolean(p.captionBold),
         captionBox: Boolean(p.captionBox),
@@ -269,6 +273,12 @@ export function registerIpcHandlers(): void {
         faceZoomIntervalSec: clampNumber(p.faceZoomIntervalSec, 0.5, 30, 3),
         faceZoomPulseSec: clampNumber(p.faceZoomPulseSec, 0.05, 2, 0.35),
         faceZoomStrength: clampNumber(p.faceZoomStrength, 0, 0.45, 0.12),
+        outputAspectRatio: ['original', '16:9', '9:16', '1:1', '4:5'].includes(
+          String(p.outputAspectRatio),
+        )
+          ? String(p.outputAspectRatio)
+          : 'original',
+        videoSpeed: clampNumber(p.videoSpeed, 0.25, 4, 1),
       },
       {
         timeoutMs: LONG_ENGINE_TIMEOUT_MS,

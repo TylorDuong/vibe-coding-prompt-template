@@ -39,6 +39,9 @@ export type GraphicPosition =
 
 export type GraphicMotion = 'none' | 'slide_in'
 
+/** Export-only: center-crop to this aspect; original keeps source dimensions. */
+export type OutputAspectRatio = 'original' | '16:9' | '9:16' | '1:1' | '4:5'
+
 export type PipelineConfig = {
   silenceThresholdDb: number
   minSilenceDurationMs: number
@@ -54,6 +57,8 @@ export type PipelineConfig = {
   captionFontSize: number
   /** #RRGGBB */
   captionFontColor: string
+  /** #RRGGBB — drawtext border (outline) in export */
+  captionOutlineColor: string
   captionPosition: CaptionPosition
   captionBold: boolean
   captionBox: boolean
@@ -73,6 +78,10 @@ export type PipelineConfig = {
   faceZoomIntervalSec: number
   faceZoomPulseSec: number
   faceZoomStrength: number
+  /** Export: center crop to this aspect ratio */
+  outputAspectRatio: OutputAspectRatio
+  /** Export: playback speed multiplier (1 = normal) */
+  videoSpeed: number
 }
 
 export type PipelineResult = {

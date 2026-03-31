@@ -216,6 +216,9 @@ def handle(message: dict) -> EngineResult:
         graphic_width_frac = graphic_w_pct / 100.0
         caption_font_size = int(sanitize_number(message.get("captionFontSize"), 12, 120, 24))
         caption_font_color = _sanitize_hex_color(message.get("captionFontColor"), "FFFFFF")
+        caption_outline_color = _sanitize_hex_color(
+            message.get("captionOutlineColor"), "000000"
+        )
         caption_position = _sanitize_choice(
             message.get("captionPosition"), {"bottom", "center"}, "bottom"
         )
@@ -241,6 +244,9 @@ def handle(message: dict) -> EngineResult:
         face_zoom_iv = float(sanitize_number(message.get("faceZoomIntervalSec"), 0.5, 30.0, 3.0))
         face_zoom_pulse = float(sanitize_number(message.get("faceZoomPulseSec"), 0.05, 2.0, 0.35))
         face_zoom_str = float(sanitize_number(message.get("faceZoomStrength"), 0.0, 0.45, 0.12))
+        aspect_raw = str(message.get("outputAspectRatio") or "original").strip().lower()
+        output_aspect = aspect_raw if aspect_raw in ("original", "16:9", "9:16", "1:1", "4:5") else "original"
+        video_speed = float(sanitize_number(message.get("videoSpeed"), 0.25, 4.0, 1.0))
 
         silence_result = detect_silence(video_path, silence_threshold_db=silence_db, min_silence_duration_ms=silence_ms)
         total_duration = silence_result.data.get("total_duration", 0) if silence_result.ok and silence_result.data else 0
@@ -284,6 +290,7 @@ def handle(message: dict) -> EngineResult:
             graphic_width_frac=graphic_width_frac,
             caption_font_size=caption_font_size,
             caption_font_color_hex=caption_font_color,
+            caption_outline_color_hex=caption_outline_color,
             caption_position=caption_position,
             caption_bold=caption_bold,
             caption_box=caption_box,
@@ -302,6 +309,8 @@ def handle(message: dict) -> EngineResult:
             face_zoom_interval_sec=face_zoom_iv,
             face_zoom_pulse_sec=face_zoom_pulse,
             face_zoom_strength=face_zoom_str,
+            output_aspect_ratio=output_aspect,
+            video_speed=video_speed,
             progress_callback=_emit_export_progress,
         )
         if result.ok and result.data is not None:

@@ -2,7 +2,7 @@
 
 ## Maintaining settings presets and docs (do this on every `PipelineConfig` change)
 
-When you add, remove, rename, or change the type/range of any field under **Processing** or **Caption and export** in the UI:
+When you add, remove, rename, or change the type/range of any field under **Silence removal**, **Processing parameters** (export ratio/speed), **Caption and export**, or **Graphics sidebar** (graphic settings in preset JSON) in the UI:
 
 1. **[`src/renderer/src/lib/pipelineConfigPreset.ts`](src/renderer/src/lib/pipelineConfigPreset.ts)** — Update `DEFAULT_PIPELINE_CONFIG`, `mergePipelineConfigFromUnknown`, and bump `SPLITTY_PRESET_VERSION` only if old JSON files must not load unchanged.
 2. **[`engine/main.py`](engine/main.py)** — Extend `exportFull` sanitization and `render_full` arguments for any new engine behavior.
@@ -14,7 +14,7 @@ Sound-effect **slots** (files, triggers, volume) are not included in the JSON pr
 
 **Removed from presets:** `removeFillerWords` (feature dropped). Unknown keys in imported JSON are ignored.
 
-**New preset keys:** `graphicFadeInSec`, `graphicFadeOutSec` (seconds; 0 = off).
+**New preset keys:** `graphicFadeInSec`, `graphicFadeOutSec` (seconds; 0 = off); `captionOutlineColor` (`#RRGGBB`); `outputAspectRatio` (`original` \| `16:9` \| `9:16` \| `1:1` \| `4:5`); `videoSpeed` (0.25–4, default 1).
 
 ---
 
@@ -23,7 +23,7 @@ Sound-effect **slots** (files, triggers, volume) are not included in the JSON pr
 2. Choose a video file with speech
 3. Leave graphics sidebar empty, leave SFX slots empty (or all triggers Disabled)
 4. Click "Process Video" — wait for pipeline to complete
-5. Set "Max words" to 3 in the config panel (or load a preset JSON)
+5. Set **Max words per caption** to 3 in **Caption and export** (or load a preset JSON)
 6. Click **Export Video**
 7. Save the output MP4
 
@@ -87,7 +87,7 @@ Sound-effect **slots** (files, triggers, volume) are not included in the JSON pr
 3. Reset fields manually or restart the app; click **Import JSON…** and pick the same file
 
 **Verify:**
-- [ ] Exported file contains `splittyPresetVersion: 1` and a `pipelineConfig` object with all current fields (including `graphicFadeInSec` / `graphicFadeOutSec` when present)
+- [ ] Exported file contains `splittyPresetVersion: 1` and a `pipelineConfig` object with all current fields (including `graphicFadeInSec` / `graphicFadeOutSec`, `captionOutlineColor`, `outputAspectRatio`, `videoSpeed` when present)
 - [ ] After import, UI values match the saved preset
 - [ ] Processing and export behave consistently with the restored settings
 
@@ -109,7 +109,10 @@ Implementation roadmap. **Status:** Shipped = in codebase; **Backlog** = not sta
 | C | Attention length vs SFX density | S | Shipped (existing control) |
 | D | Face-driven zoom pulses (local OpenCV) | L | Shipped (optional flag; export uses `zoompan` + `in_time`) |
 | UI | Caption live preview in config | S | Shipped |
-| UI | Workspace layout: transcript row + graphics column, export below | M | Shipped |
+| UI | Workspace layout: transcript + graphics column in Pipeline Result; export below | M | Shipped |
+| Export | Output aspect ratio (center crop) + video speed (×) | M | Shipped |
+| UI | Silence removal vs processing vs caption sections | S | Shipped |
+| UI | Timeline: caption span row + graphic duration bars | S | Shipped |
 | — | Multiple SFX per same trigger (round-robin) | M | Shipped |
 | Preset | JSON import/export for `PipelineConfig` | S | Shipped |
 | — | Timeline scrubber + optional `local-file://` video preview | M | Shipped |
@@ -143,16 +146,16 @@ Implementation roadmap. **Status:** Shipped = in codebase; **Backlog** = not sta
 - [X] **Bold** uses a bold-capable font path (Windows: Segoe UI Bold when available).
 
 ### Enhancement UI — Caption preview
-**Goal:** See approximate caption size, color, bold, box, outline, and bottom vs center in a small 16:9 frame before export.
+**Goal:** See approximate caption size, color, bold, box, outline color, and bottom vs center on white / grey / black backgrounds before export.
 
 **Manual verification:**
-- [ ] Change caption settings — preview updates; **Bottom** vs **Center** is obvious.
+- [ ] Change caption settings — triple preview updates; **Bottom** vs **Center** is obvious; outline color matches.
 
 ### Enhancement UI — Workspace layout
-**Goal:** Transcript + timeline share a row with the graphics list; export sits below.
+**Goal:** After process, transcript and graphics (with graphic settings) sit side-by-side inside Pipeline Result; summary/timeline/video/events stay full width above; **Export Video** remains below.
 
 **Manual verification:**
-- [ ] After process: scrubber and transcript left (flex), graphics narrow column right; **Export Video** is under the row.
+- [ ] After process: transcript left, graphics column right in the lower section; **Export Video** is under the card.
 
 ### Enhancement A3 — Graphic position
 **Goal:** Place graphics at center (default) or corners / top / bottom.
@@ -193,10 +196,11 @@ Implementation roadmap. **Status:** Shipped = in codebase; **Backlog** = not sta
 - [ ] Profile / no face — no crash; neutral crop.
 
 ### Enhancement — Timeline scrubber + preview
-**Goal:** Drag/click playhead on the bar; optional `<video>` seeks via `local-file://`.
+**Goal:** Drag/click playhead on the bar; optional `<video>` seeks via `local-file://` (main process resolves Windows paths).
 
 **Manual verification:**
 - [ ] Drag playhead — time label updates; video frame follows (if preview visible).
+- [ ] Caption row shows blue spans; main row shows green graphic spans and red silence regions.
 
 ### Enhancement — Export progress
 **Goal:** Linear 0–100% while FFmpeg runs.

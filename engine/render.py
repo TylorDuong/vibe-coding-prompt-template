@@ -356,6 +356,75 @@ def _hex_to_fontcolor(value: str) -> str:
     return "white"
 
 
+_ASPECT_TARGET_WH: dict[str, tuple[int, int]] = {
+    "16:9": (16, 9),
+    "9:16": (9, 16),
+    "1:1": (1, 1),
+    "4:5": (4, 5),
+}
+
+
+def _center_crop_filter(iw: int, ih: int, aspect_key: str) -> str | None:
+    """FFmpeg crop=w:h:x:y for center crop to target aspect; None if original or invalid."""
+    key = str(aspect_key or "").strip().lower()
+    if key in ("", "original"):
+        return None
+    tw_th = _ASPECT_TARGET_WH.get(key)
+    if not tw_th:
+        return None
+    tw, th = tw_th
+    ar_out = tw / th
+    ar_in = iw / ih
+    if ar_in > ar_out:
+        h = ih - (ih % 2)
+        w = int(round(h * ar_out))
+        w -= w % 2
+        w = min(max(w, 2), iw - (iw % 2))
+        h = min(h, ih - (ih % 2))
+        x = max(0, (iw - w) // 2)
+        y = max(0, (ih - h) // 2)
+    else:
+        w = iw - (iw % 2)
+        h = int(round(w / ar_out))
+        h -= h % 2
+        h = min(max(h, 2), ih - (ih % 2))
+        w = min(w, iw - (iw % 2))
+        x = max(0, (iw - w) // 2)
+        y = max(0, (ih - h) // 2)
+    return f"crop={w}:{h}:{x}:{y}"
+
+
+def _atempo_segments(speed: float) -> list[str]:
+    """FFmpeg atempo values; each in (0.5, 2.0] except last."""
+    speed = max(0.25, min(4.0, float(speed)))
+    if abs(speed - 1.0) < 1e-6:
+        return []
+    parts: list[str] = []
+    rem = speed
+    while rem > 2.0 + 1e-9:
+        parts.append("atempo=2.0")
+        rem /= 2.0
+    while rem < 0.5 - 1e-9:
+        parts.append("atempo=0.5")
+        rem /= 0.5
+    parts.append(f"atempo={rem:.6f}")
+    return parts
+
+
+def _chain_audio_atempo(from_label: str, speed: float, out_label: str) -> str:
+    """e.g. from_label=a0 -> [a0]atempo...[out_label]. Empty if speed ~= 1."""
+    segs = _atempo_segments(speed)
+    if not segs:
+        return ""
+    cur = from_label
+    chunks: list[str] = []
+    for i, seg in enumerate(segs):
+        nxt = out_label if i == len(segs) - 1 else f"atmp{i}"
+        chunks.append(f"[{cur}]{seg}[{nxt}]")
+        cur = nxt
+    return ";".join(chunks)
+
+
 def _caption_alpha_expr(start: float, end: float, fade_in: float, fade_out: float) -> str:
     s, e = start, end
     if fade_in <= 0.001 and fade_out <= 0.001:
@@ -656,6 +725,7 @@ def render_full(
     graphic_width_frac: float = 0.85,
     caption_font_size: int = 24,
     caption_font_color_hex: str = "FFFFFF",
+    caption_outline_color_hex: str = "000000",
     caption_position: str = "bottom",
     caption_bold: bool = False,
     caption_box: bool = False,
@@ -674,6 +744,8 @@ def render_full(
     face_zoom_interval_sec: float = 3.0,
     face_zoom_pulse_sec: float = 0.35,
     face_zoom_strength: float = 0.12,
+    output_aspect_ratio: str = "original",
+    video_speed: float = 1.0,
     progress_callback: Callable[[int], None] | None = None,
 ) -> EngineResult:
     """Render the final video with captions, graphics, and SFX overlaid."""
@@ -755,6 +827,7 @@ def render_full(
             graphic_width_frac=max(0.1, min(float(graphic_width_frac), 1.0)),
             caption_font_size=max(8, min(int(caption_font_size), 120)),
             caption_font_color_hex=str(caption_font_color_hex or "FFFFFF"),
+            caption_outline_color_hex=str(caption_outline_color_hex or "000000"),
             caption_position=str(caption_position or "bottom"),
             caption_bold=bool(caption_bold),
             caption_box=bool(caption_box),
@@ -770,6 +843,8 @@ def render_full(
             zoom_zf=zf,
             zoom_cx=cx,
             zoom_cy=cy,
+            output_aspect_ratio=str(output_aspect_ratio or "original"),
+            video_speed=float(video_speed),
             progress_callback=progress_callback,
         )
     except Exception as exc:
@@ -805,6 +880,7 @@ def _run_render(
     graphic_width_frac: float = 0.85,
     caption_font_size: int = 24,
     caption_font_color_hex: str = "FFFFFF",
+    caption_outline_color_hex: str = "000000",
     caption_position: str = "bottom",
     caption_bold: bool = False,
     caption_box: bool = False,
@@ -820,6 +896,8 @@ def _run_render(
     zoom_zf: float = 1.12,
     zoom_cx: float = 0.5,
     zoom_cy: float = 0.5,
+    output_aspect_ratio: str = "original",
+    video_speed: float = 1.0,
     progress_callback: Callable[[int], None] | None = None,
 ) -> None:
     """Build and execute the FFmpeg command."""
@@ -827,24 +905,39 @@ def _run_render(
         f"between(t\\,{s['start']:.3f}\\,{s['end']:.3f})" for s in keep_segments
     )
 
+    speed = max(0.25, min(4.0, float(video_speed)))
     use_complex = bool(graphic_inputs or sfx_plays)
-    probe_geo = use_complex or (zoom_active_expr and zoom_active_expr != "0")
-    if probe_geo:
+    aspect_key = str(output_aspect_ratio or "original").strip().lower()
+    need_probe = (
+        use_complex
+        or (zoom_active_expr and zoom_active_expr != "0")
+        or (aspect_key not in ("", "original"))
+    )
+    if need_probe:
         main_w, main_h = _video_frame_dimensions(video_path)
         base_fps = _video_avg_fps(video_path)
     else:
         main_w, main_h = 1280, 720
         base_fps = 30.0
 
+    crop_f = _center_crop_filter(main_w, main_h, aspect_key)
+    cw, ch = main_w, main_h
+    if crop_f:
+        m = re.match(r"crop=(\d+):(\d+):(\d+):(\d+)", crop_f)
+        if m:
+            cw, ch = int(m.group(1)), int(m.group(2))
+
     vf_inner_parts = [
         f"select='{between_clauses}'",
         "setpts=N/FRAME_RATE/TB",
     ]
+    if crop_f:
+        vf_inner_parts.append(crop_f)
     if zoom_active_expr and zoom_active_expr != "0":
         vf_inner_parts.append(
             _face_zoom_zoompan_filter(
-                main_w,
-                main_h,
+                cw,
+                ch,
                 base_fps,
                 zoom_cx,
                 zoom_cy,
@@ -855,6 +948,7 @@ def _run_render(
 
     font_cwd, font_prefix = _drawtext_fontfile_prefix(bold=caption_bold)
     font_color = _hex_to_fontcolor(caption_font_color_hex)
+    border_color = _hex_to_fontcolor(caption_outline_color_hex)
     cap_margin = 48
 
     for chunk in caption_chunks:
@@ -876,7 +970,7 @@ def _run_render(
             f":fontsize={caption_font_size}"
             f":fontcolor={font_color}"
             f":borderw={caption_border_width}"
-            f":bordercolor=black"
+            f":bordercolor={border_color}"
             f":x=(w-text_w)/2"
             f":y={_caption_y_expr(caption_position, cap_margin)}"
             f"{alpha_part}"
@@ -884,6 +978,7 @@ def _run_render(
             f":enable='between(t\\,{chunk['start']:.3f}\\,{chunk['end']:.3f})'"
         )
     vf_inner = ",".join(vf_inner_parts)
+    vf_speed_suffix = f",setpts=PTS/{speed}" if abs(speed - 1.0) >= 1e-6 else ""
 
     af_select = f"aselect='{between_clauses}',asetpts=N/SR/TB"
 
@@ -893,7 +988,12 @@ def _run_render(
     extra_args: list[str] = []
 
     if not use_complex:
-        filter_complex = f"[0:v]{vf_inner}[vfc];[0:a]{af_select}[afc]"
+        vf_full = f"{vf_inner}{vf_speed_suffix}"
+        atempo_chain = _chain_audio_atempo("a0", speed, "afc")
+        if atempo_chain:
+            filter_complex = f"[0:v]{vf_full}[vfc];[0:a]{af_select}[a0];{atempo_chain}"
+        else:
+            filter_complex = f"[0:v]{vf_full}[vfc];[0:a]{af_select}[afc]"
         map_video = "[vfc]"
         map_audio = "[afc]"
     else:
@@ -901,6 +1001,8 @@ def _run_render(
         for g in graphic_inputs:
             inputs.extend(["-loop", "1", "-framerate", "30", "-i", g["filePath"]])
             next_idx += 1
+
+        af_main = f"[0:a]{af_select}[mainaud]"
 
         sfx_argv, sfx_audio_parts, _after_sfx = _build_sfx_audio_filters(
             "mainaud",
@@ -921,7 +1023,7 @@ def _run_render(
             gss = f"gss{i}"
             try:
                 gw, gh = _graphic_display_dimensions(g["filePath"])
-                ow, oh = _overlay_dims_uniform(main_w, main_h, gw, gh, graphic_width_frac)
+                ow, oh = _overlay_dims_uniform(cw, ch, gw, gh, graphic_width_frac)
             except Exception as exc:
                 raise RuntimeError(
                     f"Could not size graphic overlay for {g['filePath']!r}: {exc}"
@@ -972,11 +1074,21 @@ def _run_render(
                 )
             current = out_lab
 
-        af_main = f"[0:a]{af_select}[mainaud]"
         audio_fc = [af_main] + sfx_audio_parts
         filter_complex = ";".join([fc_video] + audio_fc)
-        map_video = f"[{current}]"
-        map_audio = "[outa]"
+        if abs(speed - 1.0) >= 1e-6:
+            fc_video_speed = f"[{current}]setpts=PTS/{speed}[vsped]"
+            filter_complex += f";{fc_video_speed}"
+            map_video = "[vsped]"
+            atail = _chain_audio_atempo("outa", speed, "afspd")
+            if atail:
+                filter_complex += f";{atail}"
+                map_audio = "[afspd]"
+            else:
+                map_audio = "[outa]"
+        else:
+            map_video = f"[{current}]"
+            map_audio = "[outa]"
         if graphic_inputs:
             extra_args.append("-shortest")
 
@@ -990,11 +1102,12 @@ def _run_render(
             + [output_path]
         )
         dur_out = _output_duration_sec(keep_segments)
+        dur_progress = dur_out / speed if abs(speed - 1.0) >= 1e-6 else dur_out
         _execute_ffmpeg(
             cmd,
             cwd=font_cwd,
             timeout=900,
-            duration_out_sec=dur_out,
+            duration_out_sec=max(0.01, dur_progress),
             progress_cb=progress_callback,
         )
     finally:

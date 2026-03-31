@@ -1,4 +1,5 @@
 import { useState, useCallback, type DragEvent } from 'react'
+import type { PipelineConfig } from '../hooks/useProcessPipeline'
 
 export type GraphicItem = {
   id: string
@@ -19,6 +20,9 @@ type GraphicsSidebarProps = {
   onClearPlacement: (id: string) => void
   /** Next to transcript column (rounded card) vs full-height page rail */
   embedded?: boolean
+  pipelineConfig: PipelineConfig
+  onPipelineConfigChange: (config: PipelineConfig) => void
+  configDisabled?: boolean
 }
 
 type DialogImagesResult = {
@@ -44,8 +48,19 @@ export default function GraphicsSidebar({
   wordTriggers,
   onClearPlacement,
   embedded = false,
+  pipelineConfig,
+  onPipelineConfigChange,
+  configDisabled = false,
 }: GraphicsSidebarProps): React.JSX.Element {
   const [isDragging, setIsDragging] = useState(false)
+  const disabled = configDisabled
+
+  const patchConfig = useCallback(
+    (partial: Partial<PipelineConfig>) => {
+      onPipelineConfigChange({ ...pipelineConfig, ...partial })
+    },
+    [onPipelineConfigChange, pipelineConfig],
+  )
 
   const addFromPath = useCallback(
     (filePath: string) => {
@@ -119,6 +134,118 @@ export default function GraphicsSidebar({
           Select a graphic, then click a word in the transcript to set when it appears. Tags are optional
           (auto-match still runs as a fallback).
         </p>
+      </div>
+
+      <div
+        className={`space-y-2 border-b border-zinc-800 ${embedded ? 'px-3 py-2' : 'px-4 py-2'}`}
+      >
+        <h3 className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+          Graphic settings (export)
+        </h3>
+        <div className="grid grid-cols-1 gap-2">
+          <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
+            Position
+            <select
+              value={pipelineConfig.graphicPosition}
+              onChange={(e) =>
+                patchConfig({
+                  graphicPosition: e.target.value as PipelineConfig['graphicPosition'],
+                })
+              }
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            >
+              <option value="center">Center</option>
+              <option value="top">Top</option>
+              <option value="bottom">Bottom</option>
+              <option value="top_right">Top right</option>
+              <option value="top_left">Top left</option>
+              <option value="bottom_right">Bottom right</option>
+              <option value="bottom_left">Bottom left</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
+            Motion
+            <select
+              value={pipelineConfig.graphicMotion}
+              onChange={(e) =>
+                patchConfig({
+                  graphicMotion: e.target.value as PipelineConfig['graphicMotion'],
+                })
+              }
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            >
+              <option value="none">None</option>
+              <option value="slide_in">Slide in</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
+            On-screen (s)
+            <input
+              type="number"
+              min={0.5}
+              max={30}
+              step={0.5}
+              value={pipelineConfig.graphicDisplaySec}
+              onChange={(e) => patchConfig({ graphicDisplaySec: Number(e.target.value) })}
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            />
+          </label>
+          <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
+            Width (%)
+            <input
+              type="number"
+              min={10}
+              max={100}
+              step={5}
+              value={pipelineConfig.graphicWidthPercent}
+              onChange={(e) => patchConfig({ graphicWidthPercent: Number(e.target.value) })}
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            />
+          </label>
+          <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
+            Move duration (s)
+            <input
+              type="number"
+              min={0}
+              max={3}
+              step={0.05}
+              value={pipelineConfig.graphicAnimInSec}
+              onChange={(e) => patchConfig({ graphicAnimInSec: Number(e.target.value) })}
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            />
+          </label>
+          <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
+            Fade in (s)
+            <input
+              type="number"
+              min={0}
+              max={5}
+              step={0.05}
+              value={pipelineConfig.graphicFadeInSec}
+              onChange={(e) => patchConfig({ graphicFadeInSec: Number(e.target.value) })}
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            />
+          </label>
+          <label className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
+            Fade out (s)
+            <input
+              type="number"
+              min={0}
+              max={5}
+              step={0.05}
+              value={pipelineConfig.graphicFadeOutSec}
+              onChange={(e) => patchConfig({ graphicFadeOutSec: Number(e.target.value) })}
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            />
+          </label>
+        </div>
       </div>
 
       {/* Drop zone + browse button */}

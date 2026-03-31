@@ -14,6 +14,9 @@ from engine.render import (
     source_time_to_output,
     remap_interval,
     _overlay_dims_uniform,
+    _center_crop_filter,
+    _atempo_segments,
+    _chain_audio_atempo,
 )
 
 
@@ -210,6 +213,83 @@ def test_render_full_face_zoom_uses_zoompan(test_video_with_audio: str, monkeypa
         assert result.ok is True, result.error
         joined = "\n".join(captured)
         assert "zoompan" in joined
+    finally:
+        if os.path.exists(out.name):
+            os.unlink(out.name)
+
+
+def test_center_crop_filter_original_none() -> None:
+    assert _center_crop_filter(1920, 1080, "original") is None
+    assert _center_crop_filter(1920, 1080, "") is None
+
+
+def test_center_crop_filter_produces_even_dims() -> None:
+    c = _center_crop_filter(320, 240, "9:16")
+    assert c is not None
+    assert c.startswith("crop=")
+    parts = c.split("=")[1].split(":")
+    assert len(parts) == 4
+    w, h, x, y = (int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
+    assert w % 2 == 0 and h % 2 == 0
+    assert w > 0 and h > 0
+
+
+def test_atempo_segments_identity_and_double() -> None:
+    assert _atempo_segments(1.0) == []
+    assert _atempo_segments(2.0) == ["atempo=2.000000"]
+    s4 = _atempo_segments(4.0)
+    assert len(s4) == 2
+    assert s4[0] == "atempo=2.0"
+    assert s4[1] == "atempo=2.000000"
+
+
+def test_chain_audio_atempo_empty_at_speed_one() -> None:
+    assert _chain_audio_atempo("a0", 1.0, "afc") == ""
+
+
+def test_render_full_respects_outline_crop_speed_in_filter_graph(
+    test_video_with_audio: str, monkeypatch,
+) -> None:
+    from engine import render as render_mod
+
+    captured: list[str] = []
+    real_write = render_mod._write_temp_filter_complex_script
+
+    def wrap(graph: str) -> str:
+        captured.append(graph)
+        return real_write(graph)
+
+    monkeypatch.setattr(render_mod, "_write_temp_filter_complex_script", wrap)
+
+    out = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    out.close()
+    segments = [
+        {
+            "start": 0.0,
+            "end": 1.0,
+            "text": "Hi",
+            "words": [{"word": " Hi", "start": 0.0, "end": 0.5}],
+        },
+    ]
+    try:
+        result = render_mod.render_full(
+            video_path=test_video_with_audio,
+            output_path=out.name,
+            segments=segments,
+            matches=[],
+            sfx_pool={},
+            keep_segments=[{"start": 0.0, "end": 3.0}],
+            events=[],
+            caption_outline_color_hex="FF0000",
+            output_aspect_ratio="16:9",
+            video_speed=2.0,
+        )
+        assert result.ok is True, result.error
+        joined = "\n".join(captured)
+        assert "bordercolor=0xFF0000" in joined
+        assert "crop=" in joined
+        assert "setpts=PTS/2" in joined
+        assert "atempo=" in joined
     finally:
         if os.path.exists(out.name):
             os.unlink(out.name)

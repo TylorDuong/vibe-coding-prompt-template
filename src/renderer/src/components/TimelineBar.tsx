@@ -13,13 +13,6 @@ type TimelineBarProps = {
   onScrubTimeChange: (t: number) => void
 }
 
-const COLOR_MAP: Record<string, string> = {
-  caption: 'bg-blue-500',
-  graphic: 'bg-emerald-500',
-  sfx: 'bg-amber-500',
-  silence_cut: 'bg-red-500/60',
-}
-
 export default function TimelineBar({
   events,
   duration,
@@ -72,6 +65,17 @@ export default function TimelineBar({
 
   const playheadPct = Math.min(100, Math.max(0, (scrubTime / duration) * 100))
 
+  const captionEvents = events.filter((ev) => ev.type === 'caption' && ev.end != null)
+  const silenceEvents = events.filter((ev) => ev.type === 'silence_cut' && ev.end != null)
+  const graphicEvents = events.filter((ev) => ev.type === 'graphic')
+  const sfxEvents = events.filter((ev) => ev.type === 'sfx')
+
+  const barPercent = (start: number, end: number) => {
+    const left = (start / duration) * 100
+    const width = Math.max(0.35, ((end - start) / duration) * 100)
+    return { left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }
+  }
+
   return (
     <div className="mt-3 w-full">
       <div className="mb-1 flex items-center justify-between">
@@ -103,51 +107,93 @@ export default function TimelineBar({
             onScrubTimeChange(Math.min(duration, scrubTime + step))
           }
         }}
-        className="relative h-8 w-full cursor-pointer touch-none overflow-hidden rounded bg-zinc-800 outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+        className="relative w-full cursor-pointer touch-none outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:rounded"
       >
-        {events
-          .filter((ev) => ev.type === 'silence_cut' && ev.end != null)
-          .map((ev, i) => {
-            const left = (ev.start / duration) * 100
-            const width = (((ev.end ?? ev.start) - ev.start) / duration) * 100
+        {/* Caption track (source timeline) */}
+        <div className="relative mb-1 h-3 w-full overflow-hidden rounded bg-zinc-800/80">
+          {captionEvents.map((ev, i) => {
+            const end = ev.end ?? ev.start + 0.1
+            const { left, width } = barPercent(ev.start, end)
+            return (
+              <div
+                key={`cap-${i}`}
+                className="pointer-events-none absolute top-0.5 bottom-0.5 rounded-sm bg-blue-500/90"
+                style={{ left, width }}
+                title={`Caption ${ev.start.toFixed(1)}s–${end.toFixed(1)}s`}
+              />
+            )
+          })}
+          <div
+            className="pointer-events-none absolute top-0 z-10 h-full w-px bg-white/90 shadow-sm"
+            style={{ left: `${playheadPct}%`, transform: 'translateX(-50%)' }}
+          />
+        </div>
+
+        {/* Main track: silence, graphics, sfx */}
+        <div className="relative h-8 w-full overflow-hidden rounded bg-zinc-800">
+          {silenceEvents.map((ev, i) => {
+            const end = ev.end ?? ev.start
+            const { left, width } = barPercent(ev.start, end)
             return (
               <div
                 key={`sil-${i}`}
                 className="pointer-events-none absolute top-0 h-full bg-red-900/30"
-                style={{ left: `${left}%`, width: `${width}%` }}
-                title={`Silence: ${ev.start.toFixed(1)}s–${(ev.end ?? ev.start).toFixed(1)}s`}
+                style={{ left, width }}
+                title={`Silence: ${ev.start.toFixed(1)}s–${end.toFixed(1)}s`}
               />
             )
           })}
 
-        {events
-          .filter((ev) => ev.type !== 'silence_cut')
-          .map((ev, i) => {
-            const left = (ev.start / duration) * 100
-            const color = COLOR_MAP[ev.type] ?? 'bg-zinc-500'
+          {graphicEvents.map((ev, i) => {
+            const end =
+              ev.end != null && ev.end > ev.start ? ev.end : ev.start + Math.max(0.2, duration * 0.02)
+            const { left, width } = barPercent(ev.start, end)
             return (
               <div
-                key={`evt-${i}`}
-                className={`pointer-events-none absolute top-1 h-6 w-1 rounded-sm ${color}`}
-                style={{ left: `${Math.min(left, 99)}%` }}
-                title={`${ev.type} @ ${ev.start.toFixed(1)}s`}
+                key={`gfx-${i}`}
+                className="pointer-events-none absolute top-1 bottom-1 rounded-sm bg-emerald-500/85"
+                style={{ left, width }}
+                title={`Graphic ${ev.start.toFixed(1)}s–${end.toFixed(1)}s`}
               />
             )
           })}
 
-        <div
-          className="pointer-events-none absolute top-0 h-full w-px bg-white/90 shadow-sm"
-          style={{ left: `${playheadPct}%`, transform: 'translateX(-50%)' }}
-        />
+          {sfxEvents.map((ev, i) => {
+            const left = (ev.start / duration) * 100
+            return (
+              <div
+                key={`sfx-${i}`}
+                className="pointer-events-none absolute top-1 h-6 w-0.5 rounded-sm bg-amber-500"
+                style={{ left: `${Math.min(left, 99.5)}%` }}
+                title={`SFX @ ${ev.start.toFixed(1)}s`}
+              />
+            )
+          })}
+
+          <div
+            className="pointer-events-none absolute top-0 z-10 h-full w-px bg-white/90 shadow-sm"
+            style={{ left: `${playheadPct}%`, transform: 'translateX(-50%)' }}
+          />
+        </div>
       </div>
 
       <div className="mt-1.5 flex flex-wrap gap-3">
-        {Object.entries(COLOR_MAP).map(([type, color]) => (
-          <div key={type} className="flex items-center gap-1">
-            <div className={`h-2 w-2 rounded-sm ${color}`} />
-            <span className="text-[10px] text-zinc-500">{type.replace('_', ' ')}</span>
-          </div>
-        ))}
+        <div className="flex items-center gap-1">
+          <div className="h-2 w-4 rounded-sm bg-blue-500/90" />
+          <span className="text-[10px] text-zinc-500">captions (span)</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="h-2 w-4 rounded-sm bg-emerald-500/85" />
+          <span className="text-[10px] text-zinc-500">graphics (span)</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="h-2 w-0.5 rounded-sm bg-amber-500" />
+          <span className="text-[10px] text-zinc-500">sfx</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="h-2 w-4 rounded-sm bg-red-900/50" />
+          <span className="text-[10px] text-zinc-500">silence cut</span>
+        </div>
       </div>
     </div>
   )

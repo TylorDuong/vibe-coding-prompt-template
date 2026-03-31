@@ -91,6 +91,7 @@ export default function ExportVideoButton({
         graphicWidthPercent: config.graphicWidthPercent,
         captionFontSize: config.captionFontSize,
         captionFontColor: config.captionFontColor,
+        captionOutlineColor: config.captionOutlineColor,
         captionPosition: config.captionPosition,
         captionBold: config.captionBold,
         captionBox: config.captionBox,
@@ -108,6 +109,8 @@ export default function ExportVideoButton({
         faceZoomIntervalSec: config.faceZoomIntervalSec,
         faceZoomPulseSec: config.faceZoomPulseSec,
         faceZoomStrength: config.faceZoomStrength,
+        outputAspectRatio: config.outputAspectRatio,
+        videoSpeed: config.videoSpeed,
       })) as ExportResult
 
       if (exportResult.ok && exportResult.data) {

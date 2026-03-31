@@ -1,4 +1,4 @@
-import type { PipelineConfig } from '../hooks/useProcessPipeline'
+import type { OutputAspectRatio, PipelineConfig } from '../hooks/useProcessPipeline'
 import { parsePipelinePresetJson, serializePipelinePreset } from '../lib/pipelineConfigPreset'
 
 type OpenPresetResult =
@@ -11,17 +11,28 @@ type SavePresetResult =
   | { canceled: false; filePath: string }
   | { canceled: false; error: string }
 
+function captionPreviewShadow(outlinePx: number, outlineColor: string): string | undefined {
+  if (outlinePx <= 0) return undefined
+  const c = outlineColor
+  return `${outlinePx}px 0 0 ${c}, -${outlinePx}px 0 0 ${c}, 0 ${outlinePx}px 0 ${c}, 0 -${outlinePx}px 0 ${c}`
+}
+
 function CaptionStylePreview({ config }: { config: PipelineConfig }): React.JSX.Element {
   const outline = Math.max(0, config.captionBorderWidth)
   const fs = Math.min(Math.max(10, config.captionFontSize * 0.32), 26)
   const isCenter = config.captionPosition === 'center'
-  return (
-    <div className="mt-4">
-      <p className="mb-1.5 text-[10px] text-zinc-600">Caption preview (approximate; export uses FFmpeg)</p>
-      <div className="relative aspect-video w-full max-w-[280px] overflow-hidden rounded-md border border-zinc-700 bg-black">
+  const shadow = captionPreviewShadow(outline, config.captionOutlineColor)
+
+  const frame = (bgClass: string, bgStyle: React.CSSProperties | undefined, label: string) => (
+    <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="text-[9px] text-zinc-500">{label}</span>
+      <div
+        className={`relative aspect-video w-full overflow-hidden rounded-md border border-zinc-700 ${bgClass}`}
+        style={bgStyle}
+      >
         <div
-          className={`absolute inset-x-0 flex justify-center px-2 ${
-            isCenter ? 'top-1/2 -translate-y-1/2' : 'bottom-3'
+          className={`absolute inset-x-0 flex justify-center px-1 ${
+            isCenter ? 'top-1/2 -translate-y-1/2' : 'bottom-2'
           }`}
         >
           <span
@@ -30,18 +41,28 @@ function CaptionStylePreview({ config }: { config: PipelineConfig }): React.JSX.
               fontSize: fs,
               color: config.captionFontColor,
               fontWeight: config.captionBold ? 700 : 400,
-              textShadow:
-                outline > 0
-                  ? `${outline}px 0 0 #000, -${outline}px 0 0 #000, 0 ${outline}px 0 #000, 0 -${outline}px 0 #000`
-                  : undefined,
+              textShadow: shadow,
               backgroundColor: config.captionBox ? 'rgba(0,0,0,0.55)' : undefined,
-              padding: config.captionBox ? '4px 10px' : undefined,
-              borderRadius: config.captionBox ? 8 : undefined,
+              padding: config.captionBox ? '3px 8px' : undefined,
+              borderRadius: config.captionBox ? 6 : undefined,
             }}
           >
             Sample caption text
           </span>
         </div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="mt-4">
+      <p className="mb-1.5 text-[10px] text-zinc-600">
+        Caption preview (approximate; export uses FFmpeg)
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {frame('bg-white', undefined, 'White')}
+        {frame('', { backgroundColor: '#a1a1aa' }, 'Grey')}
+        {frame('bg-black', undefined, 'Black')}
       </div>
     </div>
   )
@@ -67,7 +88,7 @@ type ParamDef = {
   unit: string
 }
 
-const PARAMS: ParamDef[] = [
+const SILENCE_PARAMS: ParamDef[] = [
   {
     key: 'silenceThresholdDb',
     label: 'Silence dB',
@@ -118,9 +139,12 @@ const PARAMS: ParamDef[] = [
     step: 25,
     unit: 'ms',
   },
+]
+
+const CAPTION_NUM_PARAMS: ParamDef[] = [
   {
     key: 'maxWords',
-    label: 'Max words',
+    label: 'Max words per caption',
     tooltip:
       'Maximum number of caption words shown on screen at once. Lower values (2-3) create faster-paced TikTok-style captions. Higher values (5-8) show more context per frame.',
     min: 1,
@@ -138,29 +162,6 @@ const PARAMS: ParamDef[] = [
     step: 500,
     unit: 'ms',
   },
-  {
-    key: 'graphicDisplaySec',
-    label: 'Graphic length',
-    tooltip:
-      'Maximum time each matched graphic stays on screen in the full export. Shorter values keep overlays punchy; longer values hold the image through more of the matched speech.',
-    min: 0.5,
-    max: 30,
-    step: 0.5,
-    unit: 's',
-  },
-  {
-    key: 'graphicWidthPercent',
-    label: 'Graphic width',
-    tooltip:
-      'Target width of each overlaid graphic as a percentage of the video frame (uniform scale, image aspect ratio preserved, centered). If that width would make the graphic taller than the frame, it shrinks so it still fits vertically.',
-    min: 10,
-    max: 100,
-    step: 5,
-    unit: '%',
-  },
-]
-
-const CAPTION_NUM_PARAMS: ParamDef[] = [
   {
     key: 'captionFontSize',
     label: 'Caption size',
@@ -194,33 +195,6 @@ const CAPTION_NUM_PARAMS: ParamDef[] = [
     tooltip: 'Seconds to fade each caption line out before the next.',
     min: 0,
     max: 2,
-    step: 0.05,
-    unit: 's',
-  },
-  {
-    key: 'graphicAnimInSec',
-    label: 'Graphic move',
-    tooltip: 'Duration of slide-in motion when graphic motion is enabled.',
-    min: 0,
-    max: 3,
-    step: 0.05,
-    unit: 's',
-  },
-  {
-    key: 'graphicFadeInSec',
-    label: 'Gfx fade in',
-    tooltip: 'Alpha fade-in when each graphic appears on the export timeline (0 = off).',
-    min: 0,
-    max: 5,
-    step: 0.05,
-    unit: 's',
-  },
-  {
-    key: 'graphicFadeOutSec',
-    label: 'Gfx fade out',
-    tooltip: 'Alpha fade-out before each graphic ends on the export timeline (0 = off).',
-    min: 0,
-    max: 5,
     step: 0.05,
     unit: 's',
   },
@@ -271,6 +245,14 @@ const CAPTION_NUM_PARAMS: ParamDef[] = [
   },
 ]
 
+const ASPECT_OPTIONS: { value: OutputAspectRatio; label: string }[] = [
+  { value: 'original', label: 'Original (no crop)' },
+  { value: '16:9', label: '16:9' },
+  { value: '9:16', label: '9:16' },
+  { value: '1:1', label: '1:1' },
+  { value: '4:5', label: '4:5' },
+]
+
 function Tooltip({ text }: { text: string }): React.JSX.Element {
   return (
     <div
@@ -280,6 +262,63 @@ function Tooltip({ text }: { text: string }): React.JSX.Element {
     >
       {text}
       <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-800" />
+    </div>
+  )
+}
+
+function ParamGrid({
+  params,
+  config,
+  disabled,
+  update,
+}: {
+  params: ParamDef[]
+  config: PipelineConfig
+  disabled: boolean
+  update: (key: keyof PipelineConfig, value: number | string | boolean) => void
+}): React.JSX.Element {
+  return (
+    <div className="grid grid-cols-3 gap-x-4 gap-y-3">
+      {params.map((param) => (
+        <div key={param.key} className="relative group">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-zinc-400 cursor-help flex items-center gap-1">
+              {param.label}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-zinc-600"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </span>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={param.min}
+                max={param.max}
+                step={param.step}
+                value={config[param.key] as number}
+                onChange={(e) => update(param.key, Number(e.target.value))}
+                disabled={disabled}
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+                             focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
+              />
+              <span className="text-[10px] text-zinc-600 shrink-0 w-6">{param.unit}</span>
+            </div>
+          </label>
+          <Tooltip text={param.tooltip} />
+        </div>
+      ))}
     </div>
   )
 }
@@ -380,50 +419,73 @@ export default function ConfigPanel({
           <span className="text-zinc-500 font-mono">src/main/ipcHandlers.ts</span>, and the maintenance
           section in <span className="text-zinc-500 font-mono">OVERLAY-TEST-CHECKLIST.md</span>.
         </p>
+
         <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-3">
-          Processing Parameters
+          Silence removal
         </h3>
-        <div className="grid grid-cols-3 gap-x-4 gap-y-3">
-          {PARAMS.map((param) => (
-            <div key={param.key} className="relative group">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-zinc-400 cursor-help flex items-center gap-1">
-                  {param.label}
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="text-zinc-600"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                </span>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min={param.min}
-                    max={param.max}
-                    step={param.step}
-                    value={config[param.key] as number}
-                    onChange={(e) => update(param.key, Number(e.target.value))}
-                    disabled={disabled}
-                    className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-                             focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
-                  />
-                  <span className="text-[10px] text-zinc-600 shrink-0 w-6">{param.unit}</span>
-                </div>
-              </label>
-              <Tooltip text={param.tooltip} />
-            </div>
-          ))}
+        <ParamGrid params={SILENCE_PARAMS} config={config} disabled={disabled} update={update} />
+
+        <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-3 mt-5">
+          Processing parameters
+        </h3>
+        <p className="text-[10px] text-zinc-600 mb-3">
+          Video ratio and speed apply on <span className="text-zinc-500">Export Video</span> (center crop
+          and tempo).
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Video ratio (export)
+            <select
+              value={config.outputAspectRatio}
+              onChange={(e) =>
+                update('outputAspectRatio', e.target.value as OutputAspectRatio)
+              }
+              disabled={disabled}
+              className="rounded bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 outline-none disabled:opacity-50"
+            >
+              {ASPECT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="relative group">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-zinc-400 cursor-help flex items-center gap-1">
+                Video speed (×)
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="text-zinc-600"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={0.25}
+                  max={4}
+                  step={0.05}
+                  value={config.videoSpeed}
+                  onChange={(e) => update('videoSpeed', Number(e.target.value))}
+                  disabled={disabled}
+                  className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+                           focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
+                />
+                <span className="text-[10px] text-zinc-600 shrink-0">×</span>
+              </div>
+            </label>
+            <Tooltip text="Playback speed multiplier for the exported file (1 = normal; 2 = double speed; 0.5 = half)." />
+          </div>
         </div>
       </div>
 
@@ -443,6 +505,16 @@ export default function ConfigPanel({
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Outline color
+            <input
+              type="color"
+              value={config.captionOutlineColor}
+              onChange={(e) => update('captionOutlineColor', e.target.value)}
+              disabled={disabled}
+              className="h-8 w-full rounded border border-zinc-700 bg-zinc-800 disabled:opacity-50"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
             Caption position
             <select
               value={config.captionPosition}
@@ -454,39 +526,6 @@ export default function ConfigPanel({
             >
               <option value="bottom">Bottom</option>
               <option value="center">Center</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-zinc-400">
-            Graphic position
-            <select
-              value={config.graphicPosition}
-              onChange={(e) =>
-                update('graphicPosition', e.target.value as PipelineConfig['graphicPosition'])
-              }
-              disabled={disabled}
-              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
-            >
-              <option value="center">Center</option>
-              <option value="top">Top</option>
-              <option value="bottom">Bottom</option>
-              <option value="top_right">Top right</option>
-              <option value="top_left">Top left</option>
-              <option value="bottom_right">Bottom right</option>
-              <option value="bottom_left">Bottom left</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-zinc-400">
-            Graphic motion
-            <select
-              value={config.graphicMotion}
-              onChange={(e) =>
-                update('graphicMotion', e.target.value as PipelineConfig['graphicMotion'])
-              }
-              disabled={disabled}
-              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none disabled:opacity-50"
-            >
-              <option value="none">None</option>
-              <option value="slide_in">Slide in</option>
             </select>
           </label>
         </div>
@@ -526,7 +565,7 @@ export default function ConfigPanel({
 
         <CaptionStylePreview config={config} />
 
-        <div className="grid grid-cols-3 gap-x-4 gap-y-3">
+        <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-3">
           {CAPTION_NUM_PARAMS.map((param) => (
             <div key={param.key} className="relative group">
               <label className="flex flex-col gap-1">
