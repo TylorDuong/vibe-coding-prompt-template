@@ -14,6 +14,8 @@ export type SfxSlot = {
   trigger: SfxTrigger
   filePath: string | null
   fileName: string | null
+  /** 0–200 (%), applied as linear gain in FFmpeg before mix */
+  volumePercent: number
 }
 
 export type SfxPool = Record<string, string>
@@ -122,11 +124,43 @@ export default function SfxPoolPanel({ slots, onUpdate }: SfxPoolPanelProps): Re
                 </option>
               ))}
             </select>
+            <label className="flex items-center gap-1 shrink-0 text-[10px] text-zinc-500">
+              Vol
+              <input
+                type="number"
+                min={0}
+                max={200}
+                step={5}
+                value={slot.volumePercent}
+                onChange={(e) =>
+                  onUpdate(slot.id, { volumePercent: Number(e.target.value) })
+                }
+                disabled={!slot.filePath}
+                className="w-12 rounded bg-zinc-800 px-1 py-0.5 text-xs text-zinc-200 outline-none disabled:opacity-40"
+              />
+              <span className="text-zinc-600">%</span>
+            </label>
           </div>
         ))}
       </div>
     </div>
   )
+}
+
+export type SfxExportAssignment = {
+  trigger: string
+  filePath: string
+  volume: number
+}
+
+export function buildSfxAssignments(slots: SfxSlot[]): SfxExportAssignment[] {
+  return slots
+    .filter((s) => s.filePath !== null && s.trigger !== 'none')
+    .map((s) => ({
+      trigger: s.trigger,
+      filePath: s.filePath as string,
+      volume: Math.max(0, Math.min(2, (s.volumePercent ?? 100) / 100)),
+    }))
 }
 
 export function buildSfxPool(slots: SfxSlot[]): SfxPool {
@@ -147,6 +181,7 @@ export const DEFAULT_SFX_SLOTS: SfxSlot[] = [
     trigger: 'graphic_entry',
     filePath: null,
     fileName: null,
+    volumePercent: 100,
   },
   {
     id: 'pop',
@@ -155,6 +190,7 @@ export const DEFAULT_SFX_SLOTS: SfxSlot[] = [
     trigger: 'caption_entry',
     filePath: null,
     fileName: null,
+    volumePercent: 100,
   },
   {
     id: 'cut',
@@ -163,6 +199,7 @@ export const DEFAULT_SFX_SLOTS: SfxSlot[] = [
     trigger: 'silence_cut',
     filePath: null,
     fileName: null,
+    volumePercent: 100,
   },
   {
     id: 'chime',
@@ -171,5 +208,6 @@ export const DEFAULT_SFX_SLOTS: SfxSlot[] = [
     trigger: 'attention_fill',
     filePath: null,
     fileName: null,
+    volumePercent: 100,
   },
 ]

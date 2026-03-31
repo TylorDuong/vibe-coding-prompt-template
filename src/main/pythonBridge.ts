@@ -6,6 +6,7 @@ type PendingRequest = {
   resolve: (value: unknown) => void
   reject: (reason: unknown) => void
   timeoutId: ReturnType<typeof setTimeout>
+  onExportProgress?: (payload: { percent: number }) => void
 }
 
 let pythonProcess: ChildProcessWithoutNullStreams | null = null
@@ -25,6 +26,8 @@ export const LONG_ENGINE_TIMEOUT_MS = 45 * 60 * 1000
 
 export type SendToEngineOptions = {
   timeoutMs?: number
+  /** Emitted while `exportFull` runs (parsed from engine stdout). */
+  onExportProgress?: (payload: { percent: number }) => void
 }
 
 function getPythonPath(): string {
@@ -57,6 +60,26 @@ export function startPythonEngine(): void {
       if (!trimmed) continue
       try {
         const parsed: unknown = JSON.parse(trimmed)
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          '_exportProgress' in parsed
+        ) {
+          const wrap = parsed as { _exportProgress?: unknown }
+          const inner = wrap._exportProgress
+          if (
+            inner !== null &&
+            typeof inner === 'object' &&
+            'percent' in inner &&
+            typeof (inner as { percent: unknown }).percent === 'number'
+          ) {
+            const head = pendingQueue[0]
+            head?.onExportProgress?.({
+              percent: Math.round((inner as { percent: number }).percent),
+            })
+          }
+          continue
+        }
         const pending = pendingQueue.shift()
         if (pending) {
           clearTimeout(pending.timeoutId)
@@ -131,7 +154,14 @@ export function sendToEngine(
       ))
     }, timeoutMs)
 
-    pendingQueue.push({ resolve, reject, timeoutId })
+    pendingQueue.push({
+      resolve,
+      reject,
+      timeoutId,
+      ...(options?.onExportProgress !== undefined
+        ? { onExportProgress: options.onExportProgress }
+        : {}),
+    })
 
     try {
       pythonProcess.stdin.write(JSON.stringify(payload) + '\n')

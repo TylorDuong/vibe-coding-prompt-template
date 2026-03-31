@@ -4,11 +4,17 @@ import FileCard from './components/FileCard'
 import ProcessButton from './components/ProcessButton'
 import ProgressBar from './components/ProgressBar'
 import ConfigPanel from './components/ConfigPanel'
-import SfxPoolPanel, { buildSfxPool, DEFAULT_SFX_SLOTS, type SfxSlot } from './components/SfxPoolPanel'
+import SfxPoolPanel, {
+  buildSfxAssignments,
+  buildSfxPool,
+  DEFAULT_SFX_SLOTS,
+  type SfxSlot,
+} from './components/SfxPoolPanel'
 import TimelinePreview, { type TimelineData } from './components/TimelinePreview'
 import GraphicsSidebar, { type GraphicItem } from './components/GraphicsSidebar'
 import ExportVideoButton from './components/ExportVideoButton'
 import { useProcessPipeline, type PipelineConfig } from './hooks/useProcessPipeline'
+import { DEFAULT_PIPELINE_CONFIG } from './lib/pipelineConfigPreset'
 import {
   buildExportMatches,
   mergeTimelineWithMatches,
@@ -23,23 +29,15 @@ type LoadedFile = {
   meta: FileMetadata
 }
 
-const DEFAULT_CONFIG: PipelineConfig = {
-  silenceThresholdDb: -40,
-  minSilenceDurationMs: 800,
-  paddingMs: 200,
-  mergeGapMs: 300,
-  minKeepMs: 150,
-  attentionLengthMs: 3000,
-  maxWords: 3,
-  graphicDisplaySec: 2,
-  graphicWidthPercent: 85,
-}
+const DEFAULT_CONFIG: PipelineConfig = DEFAULT_PIPELINE_CONFIG
 
 function App(): React.JSX.Element {
   const [engineStatus, setEngineStatus] = useState<EngineStatus>('checking')
   const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null)
   const [graphics, setGraphics] = useState<GraphicItem[]>([])
   const [config, setConfig] = useState<PipelineConfig>(DEFAULT_CONFIG)
+  const [presetNotice, setPresetNotice] = useState<string | null>(null)
+  const [presetError, setPresetError] = useState<string | null>(null)
   const [sfxSlots, setSfxSlots] = useState<SfxSlot[]>(DEFAULT_SFX_SLOTS)
   const [selectedGraphicId, setSelectedGraphicId] = useState<string | null>(null)
   const [wordTriggers, setWordTriggers] = useState<Record<string, WordTrigger>>({})
@@ -104,6 +102,17 @@ function App(): React.JSX.Element {
   useEffect(() => {
     checkEngine()
   }, [checkEngine])
+
+  useEffect(() => {
+    if (!presetNotice && !presetError) {
+      return
+    }
+    const t = window.setTimeout(() => {
+      setPresetNotice(null)
+      setPresetError(null)
+    }, 6000)
+    return () => window.clearTimeout(t)
+  }, [presetNotice, presetError])
 
   const handleFileAccepted = useCallback((filePath: string, meta: FileMetadata) => {
     setLoadedFile({ filePath, meta })
@@ -201,8 +210,7 @@ function App(): React.JSX.Element {
         <span className="text-xs text-zinc-600">v0.2.0</span>
       </header>
 
-      <main className="flex flex-1 overflow-hidden">
-        {/* Workspace area */}
+      <main className="flex flex-1 flex-col overflow-hidden">
         <section className="flex flex-1 flex-col overflow-auto pb-4">
           {loadedFile ? (
             <>
@@ -212,10 +220,26 @@ function App(): React.JSX.Element {
                 onClear={handleClear}
               />
 
+              {(presetNotice ?? presetError) && (
+                <div className="mx-4 mt-2 rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2">
+                  {presetError && <p className="text-xs text-red-400">{presetError}</p>}
+                  {presetNotice && <p className="text-xs text-emerald-400">{presetNotice}</p>}
+                </div>
+              )}
+
               <ConfigPanel
                 config={config}
                 onChange={setConfig}
+                defaultConfig={DEFAULT_CONFIG}
                 disabled={isProcessing}
+                onPresetSuccess={(msg) => {
+                  setPresetError(null)
+                  setPresetNotice(msg)
+                }}
+                onPresetError={(msg) => {
+                  setPresetNotice(null)
+                  setPresetError(msg)
+                }}
               />
 
               <SfxPoolPanel
@@ -247,41 +271,57 @@ function App(): React.JSX.Element {
                 </div>
               )}
 
-              {pipeline.result && displayTimeline && (
-                <>
-                  <ExportVideoButton
-                    videoPath={loadedFile.filePath}
-                    config={config}
-                    pipelineResult={pipeline.result}
-                    exportMatches={exportMatches}
-                    sfxPool={buildSfxPool(sfxSlots)}
-                    disabled={isProcessing}
-                  />
+              <div className="mx-4 mt-3 min-h-[min(280px,42vh)]">
+                {pipeline.result && displayTimeline ? (
                   <TimelinePreview
+                    videoPath={loadedFile.filePath}
                     timeline={displayTimeline}
+                    keepSegments={pipeline.result.keepSegments ?? []}
+                    attentionLengthMs={config.attentionLengthMs}
                     selectedGraphicId={selectedGraphicId}
                     wordTriggers={wordTriggers}
                     onWordAssign={handleWordAssign}
+                    graphicsSidebar={
+                      <GraphicsSidebar
+                        embedded
+                        pipelineConfig={config}
+                        onPipelineConfigChange={setConfig}
+                        configDisabled={isProcessing}
+                        graphics={graphics}
+                        onAdd={handleAddGraphic}
+                        onRemove={handleRemoveGraphic}
+                        onTagChange={handleTagChange}
+                        selectedId={selectedGraphicId}
+                        onSelect={setSelectedGraphicId}
+                        wordTriggers={wordTriggers}
+                        onClearPlacement={handleClearWordPlacement}
+                      />
+                    }
                   />
-                </>
+                ) : (
+                  <div className="flex min-h-[min(200px,30vh)] items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-4 py-10 text-center text-xs text-zinc-500">
+                    Run <span className="mx-1 font-medium text-zinc-400">Process video</span> to open the
+                    transcript, timeline scrubber, preview, and graphics panel.
+                  </div>
+                )}
+              </div>
+
+              {pipeline.result && displayTimeline && (
+                <ExportVideoButton
+                  videoPath={loadedFile.filePath}
+                  config={config}
+                  pipelineResult={pipeline.result}
+                  exportMatches={exportMatches}
+                  sfxPool={buildSfxPool(sfxSlots)}
+                  sfxAssignments={buildSfxAssignments(sfxSlots)}
+                  disabled={isProcessing}
+                />
               )}
             </>
           ) : (
             <UploadZone onFileAccepted={handleFileAccepted} />
           )}
         </section>
-
-        {/* Graphics sidebar */}
-        <GraphicsSidebar
-          graphics={graphics}
-          onAdd={handleAddGraphic}
-          onRemove={handleRemoveGraphic}
-          onTagChange={handleTagChange}
-          selectedId={selectedGraphicId}
-          onSelect={setSelectedGraphicId}
-          wordTriggers={wordTriggers}
-          onClearPlacement={handleClearWordPlacement}
-        />
       </main>
 
       {/* Status bar */}

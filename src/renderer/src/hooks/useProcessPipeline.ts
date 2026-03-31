@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import type { GraphicItem } from '../components/GraphicsSidebar'
+import type { KeepSegment } from '../lib/timelineRemap'
 
 export type PipelineStage =
   | 'idle'
@@ -25,6 +26,22 @@ type StageResult = {
   error?: string
 }
 
+export type CaptionPosition = 'bottom' | 'center'
+
+export type GraphicPosition =
+  | 'center'
+  | 'top'
+  | 'bottom'
+  | 'top_right'
+  | 'top_left'
+  | 'bottom_right'
+  | 'bottom_left'
+
+export type GraphicMotion = 'none' | 'slide_in'
+
+/** Export-only: center-crop to this aspect; original keeps source dimensions. */
+export type OutputAspectRatio = 'original' | '16:9' | '9:16' | '1:1' | '4:5'
+
 export type PipelineConfig = {
   silenceThresholdDb: number
   minSilenceDurationMs: number
@@ -37,6 +54,34 @@ export type PipelineConfig = {
   graphicDisplaySec: number
   /** Max graphic width as % of video width (centered) */
   graphicWidthPercent: number
+  captionFontSize: number
+  /** #RRGGBB */
+  captionFontColor: string
+  /** #RRGGBB — drawtext border (outline) in export */
+  captionOutlineColor: string
+  captionPosition: CaptionPosition
+  captionBold: boolean
+  captionBox: boolean
+  captionBorderWidth: number
+  captionFadeInSec: number
+  captionFadeOutSec: number
+  graphicPosition: GraphicPosition
+  graphicMotion: GraphicMotion
+  graphicAnimInSec: number
+  sfxCaptionEveryN: number
+  sfxGraphicEveryN: number
+  /** Alpha fade-in at graphic start on export timeline (seconds). */
+  graphicFadeInSec: number
+  /** Alpha fade-out before graphic end on export timeline (seconds). */
+  graphicFadeOutSec: number
+  faceZoomEnabled: boolean
+  faceZoomIntervalSec: number
+  faceZoomPulseSec: number
+  faceZoomStrength: number
+  /** Export: center crop to this aspect ratio */
+  outputAspectRatio: OutputAspectRatio
+  /** Export: playback speed multiplier (1 = normal) */
+  videoSpeed: number
 }
 
 export type PipelineResult = {
@@ -47,6 +92,8 @@ export type PipelineResult = {
   events: Record<string, unknown>[]
   eventCounts: Record<string, number>
   silenceThresholdMs: number
+  /** Kept spans on the source timeline (for mapping to export time) */
+  keepSegments?: KeepSegment[]
 }
 
 const STAGE_LABELS: Record<PipelineStage, string> = {
